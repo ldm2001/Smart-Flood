@@ -1,0 +1,7 @@
+fastapi==0.133.1
+uvicorn==0.41.0
+pydantic==2.12.5
+PyYAML==6.0.2
+httpx==0.28.1
+pytest==9.0.3
+ruff==0.17.0
