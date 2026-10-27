@@ -1,0 +1,9 @@
+backend/logs/*.jsonl
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+node_modules/
+.env*
+!.env.example
+.DS_Store
