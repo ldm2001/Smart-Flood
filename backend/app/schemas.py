@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from typing import TYPE_CHECKING, Annotated, Literal
 
-if TYPE_CHECKING:  # 타입 검사할 때만 읽는다(순환 참조 방지)
+if TYPE_CHECKING:  # 타입 검사할 때만 읽음(순환 참조 방지)
     from app.core.calibration import Delta
     from app.core.model import State
     from app.service import Snapshot
@@ -20,32 +20,31 @@ KST_OFFSET = timedelta(hours=9)  # 한국 표준시 +09:00
 
 # 시각 글자가 ISO 8601 이고 +09:00 인지 검사
 def stamp(value: str) -> str:
-    try:  # 해석을 시도
-        offset = datetime.fromisoformat(value).utcoffset()  # 시각의 UTC 차이를 읽음
+    try:
+        offset = datetime.fromisoformat(value).utcoffset()
     except ValueError as error:  # ISO 형식이 아니면
-        raise ValueError(f"ISO 8601 시각이 아니다: {value!r}") from error  # 형식 오류를 냄
+        raise ValueError(f"ISO 8601 시각이 아니다: {value!r}") from error
     if offset != KST_OFFSET:  # +09:00 이 아니면
-        raise ValueError(f"시각은 +09:00 이어야 한다: {value!r}")  # 시간대 오류를 냄
+        raise ValueError(f"시각은 +09:00 이어야 한다: {value!r}")
     return value  # 통과한 값을 그대로 반환
 
 
-# JSON 숫자만 받는 실수 타입을 만든다(문자열·불리언 거부)
+# JSON 숫자만 받는 실수 타입을 만듦(문자열·불리언 거부)
 def number(**bounds: float):
     return Annotated[float, Field(strict=True, **bounds)]  # 엄격 모드에 범위(ge·le·gt)를 붙임
 
 
-KstTime = Annotated[str, AfterValidator(stamp)]  # 한국 시각 글자
+KstTime = Annotated[str, AfterValidator(stamp)]
 Level = number(ge=0, le=500)  # 수위(mm) 0~500. 벗어나면 잘라 내지 않고 검증 실패
 Elapsed = number(ge=0, le=864_000)  # 경과 시간(초) 0~864000
-NonNegative = number(ge=0)  # 0 이상의 수
-BlockageType = Literal["none", "partial", "full"]  # 막힘 종류
-RainPreset = Literal["light", "medium", "heavy"]  # 강우 프리셋
+NonNegative = number(ge=0)
+BlockageType = Literal["none", "partial", "full"]
+RainPreset = Literal["light", "medium", "heavy"]
 
 
 
 # /api/state 응답의 공통 바탕(4.1). 기존 필드는 바꾸지 않고 추가만
 class Response(BaseModel):
-    # 모르는 필드는 허용하고 NaN·무한대는 거부
     model_config = ConfigDict(extra="allow", allow_inf_nan=False)
 
 
@@ -53,8 +52,7 @@ class Response(BaseModel):
 class Zone(Response):
     levelMm: Level  # 수위(mm)
     rateMmSec: number(ge=-20, le=20)  # 수위 변화율(mm/s) -20~20
-    # 값의 출처: 실측·가상 실측·모델 추정·재생
-    source: Literal["measured", "simulated", "estimated", "replay"]
+    source: Literal["measured", "simulated", "estimated", "replay"]  # 실측·가상 실측·모델 추정·재생
 
 
 # A·B·C 세 구역
@@ -66,7 +64,7 @@ class Zones(Response):
 
 # 10·20·30 초 뒤 예측 수위
 class Horizons(Response):
-    model_config = ConfigDict(serialize_by_alias=True)  # 내보낼 때 별칭 키(10·20·30)를 기록
+    model_config = ConfigDict(serialize_by_alias=True)  # 내보낼 때 별칭 키(10·20·30)를 씀
 
     s10: Level = Field(alias="10")  # 10 초 뒤 수위(mm)
     s20: Level = Field(alias="20")  # 20 초 뒤 수위(mm)
@@ -147,64 +145,61 @@ class Board(Response):
     outputsLocked: Literal[True]  # 출력 잠금(항상 true)
     dataSource: Literal["sim", "replay", "live"]  # 입력원: 시뮬레이션·재생·실측
     alerts: list[Alert]  # 경보 목록
-    # 추가 필드(회차 진행 상태). 검증은 선택, 응답에는 항상 있다
-    runState: Literal["idle", "running", "stopped"] | None = None
+    runState: Literal["idle", "running", "stopped"] | None = None  # 추가 필드(회차 진행 상태)
     predictionMeta: Meta | None = None  # 추가 필드: 예측 메타 정보
 
-    @classmethod  # 클래스 메서드(인스턴스 없이 부른다)
-    # 서비스 스냅샷을 API 응답으로 바꾼다(단위는 mm·L·L/min)
+    @classmethod  # 클래스 메서드(인스턴스 없이 부름)
+    # 서비스 스냅샷을 API 응답으로 변환(단위는 mm·L·L/min)
     def snapshot(cls, s: Snapshot) -> Board:
-        p = s.prediction  # 예측 결과
+        p = s.prediction
         timestamp = s.timestamp.isoformat(timespec="milliseconds")  # 응답 시각(밀리초 단위 ISO)
-        return cls.model_validate(  # 검증을 거쳐 응답을 만듦
-            {  # 응답 내용
-                "experimentId": s.experiment_id,  # 실험 회차 ID
-                # 재생이면 replay, 아니면 live
+        return cls.model_validate(
+            {
+                "experimentId": s.experiment_id,
                 "mode": "replay" if s.data_source == "replay" else "live",
-                "timestamp": timestamp,  # 응답 시각
+                "timestamp": timestamp,
                 "elapsedSec": s.elapsed_s,  # 경과 시간(초)
-                "zones": {  # 구역별 측정값
-                    z: {  # 구역마다
+                "zones": {
+                    z: {
                         "levelMm": s.levels_m[z] * M_TO_MM,  # 수위 m → mm
                         "rateMmSec": s.rates_m_per_s[z] * M_TO_MM,  # 변화율 m/s → mm/s
-                        "source": s.zone_sources[z],  # 값의 출처
+                        "source": s.zone_sources[z],
                     }
-                    for z in ZONES  # A·B·C 구역 순서대로
+                    for z in ZONES
                 },
-                "predictions": {  # 구역별 예측
-                    # 10·20·30 초 뒤 수위 m → mm (키는 글자)
+                "predictions": {
                     z: {str(h): p.levels_m[z][h] * M_TO_MM for h in CONTRACT_HORIZONS_S}
-                    for z in ZONES  # A·B·C 구역 순서대로
+                    for z in ZONES
                 },
-                "drain": {  # 배수 현황
+                "drain": {
                     "volumeL": s.drained_m3 * M3_TO_L,  # 누적 배수량 m³ → L
                     "flowLMin": s.drain_flow_m3s * M3S_TO_L_PER_MIN,  # 배수 유량 m³/s → L/min
                 },
-                "rain": {  # 강우 현황
-                    "state": "ON" if s.rain_on else "OFF",  # 강우 켜짐 여부
-                    "intensity": s.rain_label,  # 강우 세기 이름
+                "rain": {
+                    "state": "ON" if s.rain_on else "OFF",
+                    "intensity": s.rain_label,
                     "mmPerHour": s.rain_mm_per_h,  # 강우 세기(mm/h)
                 },
-                "blockage": {  # 막힘 현황
-                    "location": s.blockage_location,  # 막힌 빗물받이
-                    "type": s.blockage_type,  # 막힘 종류
-                    "label": s.blockage_label,  # 막힘 이름
+                "blockage": {
+                    "location": s.blockage_location,
+                    "type": s.blockage_type,
+                    "label": s.blockage_label,
                 },
-                "devices": dict(s.devices),  # 장치 상태 복사본
-                "quality": s.quality,  # 데이터 품질
+                "devices": dict(s.devices),
+                "quality": s.quality,
                 "outputsLocked": True,  # 출력은 항상 잠금
-                "dataSource": s.data_source,  # 입력원
-                "alerts": list(s.alerts),  # 경보 목록 복사본
-                "runState": s.run_state,  # 회차 진행 상태
-                "predictionMeta": {  # 예측 메타 정보
-                    "basisTime": timestamp,  # 예측 기준 시각
-                    "basisElapsedSec": p.basis_elapsed_s,  # 예측 기준 경과 시간
-                    "validForSec": p.valid_for_s,  # 예측 유효 시간
-                    "modelVersion": p.model_version,  # 모델 버전
-                    "assumptions": {  # 예측 가정
-                        "rule": p.assumptions["rule"],  # 예측 규칙
-                        "rainMmPerHour": p.assumptions["rain_mm_per_h"],  # 가정한 강우 세기
-                        "blockage": p.assumptions["blockage"],  # 가정한 막힘
+                "dataSource": s.data_source,
+                "alerts": list(s.alerts),
+                "runState": s.run_state,
+                "predictionMeta": {
+                    "basisTime": timestamp,
+                    "basisElapsedSec": p.basis_elapsed_s,
+                    "validForSec": p.valid_for_s,
+                    "modelVersion": p.model_version,
+                    "assumptions": {
+                        "rule": p.assumptions["rule"],
+                        "rainMmPerHour": p.assumptions["rain_mm_per_h"],
+                        "blockage": p.assumptions["blockage"],
                     },
                 },
             }
@@ -214,7 +209,6 @@ class Board(Response):
 
 # 제어 요청의 공통 바탕(4.2). 모양만 보고 값의 의미는 서비스가 확인
 class Request(BaseModel):
-    # 모르는 필드는 거부하고 NaN·무한대도 거부
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
@@ -244,7 +238,7 @@ class Feed(Request):
 
 # 내용 없는 요청
 class Blank(Request):
-    pass  # 필드가 없다
+    pass
 
 
 
@@ -253,7 +247,7 @@ class Intake(BaseModel):
     model_config = ConfigDict(extra="ignore")  # 모르는 필드는 무시
 
 
-# 센서 읽은 값. 없거나 NaN 이면 그 구역만 무효다
+# 센서 읽은 값. 없거나 NaN 이면 그 구역만 무효
 class Readings(Intake):
     distA_mm: float | None = None  # A 구역 수면까지 거리(mm)
     distB_mm: float | None = None  # B 구역 수면까지 거리(mm)
@@ -278,116 +272,110 @@ class Message(Intake):
 
 
 
-# NaN·무한대를 'nan'·'inf' 글자로 바꾼다(JSON 에 못 쓴다)
+# NaN·무한대를 'nan'·'inf' 글자로 변환(JSON 에 못 씀)
 def encoding(value):
-    # 유한하지 않은 실수면(422 의 input, obs 의 raw 에서 쓴다)
     if isinstance(value, float) and not math.isfinite(value):
-        return repr(value)  # 글자로 돌려준다(재생이 Message 의 float 로 다시 읽는다)
-    if isinstance(value, dict):  # 딕셔너리면
-        return {key: encoding(item) for key, item in value.items()}  # 값마다 다시 변환
-    if isinstance(value, list):  # 리스트면
-        return [encoding(item) for item in value]  # 항목마다 다시 변환
+        return repr(value)  # 글자로 돌려줌(재생이 Message 의 float 로 다시 읽음)
+    if isinstance(value, dict):
+        return {key: encoding(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [encoding(item) for item in value]
     return value  # 그 밖의 값은 그대로 반환
 
 
-LOG_VERSION = 1  # 기록 형식 버전. 줄 하나가 JSON 객체 하나이고 단위는 API 와 같다(7장)
+LOG_VERSION = 1  # 기록 형식 버전. 줄 하나가 JSON 객체 하나이고 단위는 API 와 같음(7장)
 
 
 # 시각을 마이크로초 단위 ISO 글자로 변환
 def moment(value: datetime) -> str:
-    return value.isoformat(timespec="microseconds")  # 마이크로초까지 적는다
+    return value.isoformat(timespec="microseconds")
 
 
-# 회차 기록의 첫 줄. 재생과 비교에 필요한 구성을 담는다
+# 회차 기록의 첫 줄. 재생과 비교에 필요한 구성을 담음
 def header(
-    *,  # 아래는 이름으로만 받음
-    experiment_id: str,  # 실험 회차 ID
-    data_source: str,  # 입력원
-    start_time: datetime,  # 시작 시각
-    model_version: str,  # 모델 버전
-    config_hash: str,  # 설정 해시
-    config: dict,  # 설정 전체
-) -> dict:  # 기록 한 줄을 반환
-    return {  # 기록 내용
+    *,
+    experiment_id: str,
+    data_source: str,
+    start_time: datetime,
+    model_version: str,
+    config_hash: str,
+    config: dict,
+) -> dict:
+    return {
         "type": "meta",  # 줄 종류: 첫 줄
-        "logVersion": LOG_VERSION,  # 기록 형식 버전
-        "experimentId": experiment_id,  # 실험 회차 ID
-        "dataSource": data_source,  # 입력원
-        "startTime": moment(start_time),  # 시작 시각
-        "modelVersion": model_version,  # 모델 버전
-        "configHash": config_hash,  # 설정 해시
-        "config": config,  # 설정 전체
+        "logVersion": LOG_VERSION,
+        "experimentId": experiment_id,
+        "dataSource": data_source,
+        "startTime": moment(start_time),
+        "modelVersion": model_version,
+        "configHash": config_hash,
+        "config": config,
     }
 
 
-# 조작 한 건. elapsedSec 는 적용 시각이다(다음 tick 부터 걸린다)
+# 조작 한 건. elapsedSec 는 적용 시각(다음 tick 부터 걸림)
 def directive(
-    kind: str,  # 조작 종류
+    kind: str,
     elapsed_s: float,  # 적용 경과 시간(초)
-    received_at: datetime,  # 받은 시각
-    *,  # 아래는 이름으로만 받음
+    received_at: datetime,
+    *,
     rain_mm_per_h: float | None = None,  # 바꾼 강우 세기(없으면 생략)
     blockage: tuple[str, str | None] | None = None,  # 바꾼 막힘(종류, 위치)
-) -> dict:  # 기록 한 줄을 반환
-    record = {  # 기록 기본 내용
+) -> dict:
+    record = {
         "type": "cmd",  # 줄 종류: 조작
-        "kind": kind,  # 조작 종류
-        "elapsedSec": elapsed_s,  # 적용 경과 시간
-        "receivedAt": moment(received_at),  # 받은 시각
+        "kind": kind,
+        "elapsedSec": elapsed_s,
+        "receivedAt": moment(received_at),
     }
-    if rain_mm_per_h is not None:  # 강우를 바꿨으면
-        record["rainMmPerHour"] = rain_mm_per_h  # 강우 세기를 적는다
-    if blockage is not None:  # 막힘을 바꿨으면
-        blockage_type, location = blockage  # 종류와 위치를 푼다
-        record["blockage"] = {"type": blockage_type, "location": location}  # 막힘을 적는다
-    return record  # 기록 한 줄을 반환
+    if rain_mm_per_h is not None:
+        record["rainMmPerHour"] = rain_mm_per_h
+    if blockage is not None:
+        blockage_type, location = blockage
+        record["blockage"] = {"type": blockage_type, "location": location}
+    return record
 
 
-# 받은 관측 메시지 하나와 그 해석. 무효 센서의 값은 null 이다
+# 받은 관측 메시지 하나와 그 해석. 무효 센서의 값은 null
 def observation(
     elapsed_s: float,  # 경과 시간(초)
-    received_at: datetime,  # 받은 시각
-    raw: dict,  # 받은 원본
+    received_at: datetime,
+    raw: dict,
     levels_m: dict[str, float | None],  # 구역별 수위(m), 무효면 None
     drained_m3: float | None,  # 누적 배수량(m³), 무효면 None
-    quality: dict[str, str],  # 구역별 품질
-) -> dict:  # 기록 한 줄을 반환
-    return {  # 기록 내용
+    quality: dict[str, str],
+) -> dict:
+    return {
         "type": "obs",  # 줄 종류: 관측
-        "elapsedSec": elapsed_s,  # 경과 시간
-        "receivedAt": moment(received_at),  # 받은 시각
+        "elapsedSec": elapsed_s,
+        "receivedAt": moment(received_at),
         "raw": encoding(raw),  # 받은 원본(NaN 은 글자로)
-        # 구역별 수위 m → mm (무효는 null)
         "levelsMm": {z: None if h is None else h * M_TO_MM for z, h in levels_m.items()},
-        # 누적 배수량 m³ → L (무효는 null)
         "drainVolumeL": None if drained_m3 is None else drained_m3 * M3_TO_L,
-        "quality": dict(quality),  # 구역별 품질 복사본
+        "quality": dict(quality),
     }
 
 
 # tick 하나의 결과: 그 시점 응답과 모델 내부 값
 def frame(
-    # 스냅샷, 모델 상태, 이번 보정 목록
     snapshot: Snapshot, model_state: State, corrections: tuple[Delta, ...]
-) -> dict:  # 기록 한 줄을 반환
-    return {  # 기록 내용
+) -> dict:
+    return {
         "type": "state",  # 줄 종류: 상태
-        "elapsedSec": snapshot.elapsed_s,  # 경과 시간
-        # 그 시점의 /api/state 응답
-        "state": Board.snapshot(snapshot).model_dump(mode="json", by_alias=True),
-        "model": {  # 모델 내부 값
+        "elapsedSec": snapshot.elapsed_s,
+        "state": Board.snapshot(snapshot).model_dump(mode="json", by_alias=True),  # /api/state 응답
+        "model": {
             "volumesL": {z: model_state.V[z] * M3_TO_L for z in ZONES},  # 구역 저장량 m³ → L
-            "correction": {  # 구역별 보정 내역
-                r.zone: {  # 보정 구역마다
+            "correction": {
+                r.zone: {
                     "beforeL": r.before_m3 * M3_TO_L,  # 보정 전 저장량(L)
                     "afterL": r.after_m3 * M3_TO_L,  # 보정 후 저장량(L)
                     "deltaL": r.delta_m3 * M3_TO_L,  # 바뀐 양(L)
                 }
-                for r in corrections  # 이번 보정마다
+                for r in corrections
             },
             "correctionTotalL": model_state.correction_m3 * M3_TO_L,  # 누적 보정량(L)
             "rainTotalL": model_state.rain_m3 * M3_TO_L,  # 누적 강우 유입(L)
-            # 빗물받이별 누적 배수(L)
             "drainedL": {i: v * M3_TO_L for i, v in model_state.drained_m3.items()},
         },
     }
@@ -395,10 +383,10 @@ def frame(
 
 # 사건 기록 한 줄을 만듦
 def event(kind: str, elapsed_s: float, time: datetime, message: str) -> dict:
-    return {  # 기록 내용
+    return {
         "type": "event",  # 줄 종류: 사건
-        "kind": kind,  # 사건 종류
-        "elapsedSec": elapsed_s,  # 경과 시간
-        "time": moment(time),  # 사건 시각
-        "message": message,  # 사건 설명
+        "kind": kind,
+        "elapsedSec": elapsed_s,
+        "time": moment(time),
+        "message": message,
     }
