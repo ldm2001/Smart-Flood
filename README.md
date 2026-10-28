@@ -73,6 +73,17 @@ cd frontend
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
+## 브랜치
+
+| 브랜치 | 하는 일 |
+|---|---|
+| `main` | 시연과 제출에 쓰는 안정판 |
+| `dev` | 통합 시험. `sim` 과 `sensor` 를 합쳐 시험한다 |
+| `sim` | 백엔드 시뮬레이션과 관제 웹 (`backend/`, `frontend/`) |
+| `sensor` | ESP32 와 센서 시험 (`firmware/`) |
+
+`sim` 과 `sensor` 에서 작업하고 `dev` 로 합친다. `dev` 에서 위 "검증" 의 두 명령이 모두 통과해야 `main` 으로 올린다. 서버로 보내는 펌웨어가 생기면(M4) `dev` 를 위 "실행" 대로 띄우고 보드를 붙인 시험도 거친다. `main` 은 시험을 마친 `dev` 를 그대로 받고, `main` 과 `dev` 에서는 직접 고치지 않는다. 올린 뒤에는 `sim` 과 `sensor` 가 `dev` 를 받아 어긋나지 않게 한다.
+
 ## 진행 상황
 
 백엔드(검증 번호는 백엔드 지시서 9장):
