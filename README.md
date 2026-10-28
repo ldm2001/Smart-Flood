@@ -17,6 +17,8 @@ A·B·C 세 구역으로 나눈 도시 침수 모형 실험을 위한 백엔드�
 | `docs/api-contract.md` | `/api/state` 와 제어 API 계약 |
 | `firmware/` | ESP32 부품 시험 스케치(`parts/`)와 통합 시험(`node/`). 배선·순서·통과 기준은 `firmware/README.md`. 서버로 보내는 펌웨어는 M4 |
 
+이 표는 `dev` 와 `main` 에서 본 모습이다. `sim` 에는 `backend/` 와 `frontend/` 만, `sensor` 에는 `firmware/` 만 있다. 자세한 것은 "브랜치" 절을 본다.
+
 ## 실행
 
 Python 3.11 이 필요하다.
@@ -75,14 +77,18 @@ npm run lint && npm run typecheck && npm test && npm run build
 
 ## 브랜치
 
-| 브랜치 | 하는 일 |
-|---|---|
-| `main` | 시연과 제출에 쓰는 안정판 |
-| `dev` | 통합 시험. `sim` 과 `sensor` 를 합쳐 시험한다 |
-| `sim` | 백엔드 시뮬레이션과 관제 웹 (`backend/`, `frontend/`) |
-| `sensor` | ESP32 와 센서 시험 (`firmware/`) |
+| 브랜치 | 담는 폴더 | 하는 일 |
+|---|---|---|
+| `main` | `backend/`, `frontend/`, `firmware/` | 시연과 제출에 쓰는 안정판 |
+| `dev` | `backend/`, `frontend/`, `firmware/` | 통합 시험. `sim` 과 `sensor` 를 합쳐 시험한다 |
+| `sim` | `backend/`, `frontend/` 만 | 백엔드 시뮬레이션과 관제 웹 |
+| `sensor` | `firmware/` 만 | ESP32 와 센서 시험 |
 
-`sim` 과 `sensor` 에서 작업하고 `dev` 로 합친다. `dev` 에서 위 "검증" 의 두 명령이 모두 통과해야 `main` 으로 올린다. 서버로 보내는 펌웨어가 생기면(M4) `dev` 를 위 "실행" 대로 띄우고 보드를 붙인 시험도 거친다. `main` 은 시험을 마친 `dev` 를 그대로 받고, `main` 과 `dev` 에서는 직접 고치지 않는다. 올린 뒤에는 `sim` 과 `sensor` 가 `dev` 를 받아 어긋나지 않게 한다.
+시뮬레이션 공간과 센서 시험 공간은 따로 둔다. `sim` 에는 펌웨어가 없고 `sensor` 에는 백엔드와 웹이 없다.
+
+`sim` 과 `sensor` 에서 각자 작업하고 `dev` 로 합친다(풀리퀘스트의 대상도 `dev` 다). `dev` 에서 위 "검증" 의 두 명령이 모두 통과해야 `main` 으로 올린다. 서버로 보내는 펌웨어가 생기면(M4) `dev` 를 위 "실행" 대로 띄우고 보드를 붙인 시험도 거친다. `main` 은 시험을 마친 `dev` 를 그대로 받고, `main` 과 `dev` 에서는 직접 고치지 않는다.
+
+합치는 방향은 `sim`·`sensor` 에서 `dev` 로, `dev` 에서 `main` 으로 한쪽뿐이다. `sim` 과 `sensor` 가 `dev` 나 `main` 을 받으면 상대 공간의 폴더가 딸려 들어오므로 받지 않는다. 풀리퀘스트의 "Update branch" 버튼도 같은 일을 하니 누르지 않는다. `main` 으로 합칠 때는 "Create a merge commit" 을 쓴다. 그래야 `dev` 가 `git merge --ff-only origin/main` 으로 그대로 따라간다.
 
 ## 진행 상황
 
@@ -124,7 +130,7 @@ npm run lint && npm run typecheck && npm test && npm run build
 
 | 순서 | 단계 | 내용 |
 |---|---|---|
-| 1 | 보드 시험 | 코드 작업과 병행. ESP32 와 부품을 하나씩 켜 보고 실측값(초음파 최소 거리, 설치 높이, 펌프 유량, 로드셀 보정값, 릴레이·플로트 레벨)을 적는다. 순서·배선·통과 기준은 `firmware/README.md` |
+| 1 | 보드 시험 | 코드 작업과 병행. ESP32 와 부품을 하나씩 켜 보고 실측값(초음파 최소 거리, 설치 높이, 펌프 유량, 로드셀 보정값, 릴레이·플로트 레벨)을 적는다. 순서·배선·통과 기준은 `sensor` 브랜치의 `firmware/README.md` |
 | 2 | 정리 | `frontend/src/lib/mock.ts`·`mock.test.ts` 에 남은 `legacy` 이름을 지운다 |
 | 3 | M3 리뷰 2차 | 지적 1~7 을 테스트부터 쓰고 고친다: 쓰기 실패 시 되돌리기, 설치 높이보다 먼 거리는 수위 0, tick 기록 방식의 계약 설명, 시작 시각+경과 넘침, (600, 650] 구간 테스트, 빈 회차의 0바이트 파일. 8~11(포트 정리, 테스트 대역)은 M4 로 미룬다 |
 | 4 | M4 | `POST /api/ingest`, `live` 입력원, 장치 상태·입력 품질(검증 6·9). 설계서 반영: 수위센서가 1개(E4)라 B 구역 입력 방식을 정한다. 로드셀은 급수통 무게 감소(유입량)라 `drain` 필드는 두고 새 필드를 더한다. 센서 실측 뒤 설치 높이·범위를 갱신한다. 수위 이동평균을 펌웨어와 서버 어디에 둘지 정한다 |
