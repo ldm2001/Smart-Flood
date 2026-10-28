@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+from app.adapters.live import Live
 from app.adapters.replay_source import Command, Replay
 from app.config import checksum
 from app.core.calibration import (
@@ -72,11 +73,6 @@ class Fault(ValueError):
         self.message = message
 
 
-# 아직 구현하지 않은 기능(501)
-class Lack(RuntimeError):
-    pass
-
-
 # 지금 상태에서 받을 수 없는 조작(409)
 class Conflict(RuntimeError):
     pass
@@ -122,11 +118,13 @@ class Experiment:
         source: Source,  # 관측 입력원(주입받음)
         experiment_log: Journal,  # 실험 기록(주입받음)
         notifier: Notifier | None = None,  # 알림(없을 수 있음)
+        live: Live | None = None,  # 실장치 입력원(없으면 새로 만듦)
     ) -> None:
         self.clock = clock
         self.source = source
         self.experiment_log = experiment_log
         self._default_source = source
+        self._live = Live() if live is None else live  # /api/ingest 가 채우는 입력원
         self.notifier = notifier  # 위험 단계 알림(M5 전에는 부르는 곳이 없음)
         self._config = config
         self._params = Params.config(config)
@@ -139,6 +137,11 @@ class Experiment:
         self._valid_for_s = float(config["prediction"]["valid_for_s"])  # 예측 유효 시간(초)
         self._sensors = {z: Sensor.config(config["sensors"][z]) for z in OBSERVED_ZONES}
         self._load = Load.config(config["sensors"]["load"])
+        self._allowed = tuple(str(d) for d in config["devices"]["allowed"])  # 허용 장치 ID
+        self._offline_after_s = float(config["devices"]["offline_after_s"])  # 수신 끊김(초)
+        self._invalid_after_s = float(config["correction"]["invalid_after_s"])  # 품질 invalid(초)
+        self._seen: dict[str, float] = {}  # 장치 → 마지막 수신 시각(단조 초)
+        self._absent: frozenset[str] = frozenset()  # 마지막 메시지에서 absent 였던 구역
         self.review()  # 계약대로 응답할 수 있는 구성인지 봄(아니면 기동에서 실패)
         self._config_hash = checksum(config)  # 설정 해시(회차마다 meta 줄에 구성을 그대로 적음)
 
@@ -245,6 +248,7 @@ class Experiment:
         self._ticks = 0
         self._state = baseline(self._params)
         self._latest: dict[str, tuple[float, float]] = {}  # 구역 → (관측 수위 m, 받은 경과 초)
+        self._absent = frozenset()
         self.source.origin()
         self._run_state = "running"
 
@@ -257,6 +261,7 @@ class Experiment:
         self._ticks = 0
         self._state = baseline(self._params)
         self._latest = {}
+        self._absent = frozenset()
 
     # 그 날짜의 기록 중 가장 큰 번호 + 1. 재시작해도 번호가 겹치지 않음
     def serial(self, now: datetime) -> str:
@@ -337,11 +342,17 @@ class Experiment:
         if mode not in ("sim", "replay", "live"):
             raise Fault(("mode",), f"모르는 입력원: {mode}")  # 422 오류를 냄
         if mode == "live":
-            raise Lack("live 입력원은 아직 구현되지 않았다")  # 아직 없는 기능이라 501 오류를 냄
+            if self._data_source == "live":
+                return
+            self.refusal("입력원을 바꿀")  # 재생 중이면 409
+            self.switch(self._live, "live")
+            return
         if mode == "sim":
             if self._replay is not None:
                 self.fallback()
                 self.renewal()
+            elif self._data_source == "live":
+                self.switch(self._default_source, "sim")
             return
         if log_id is None:
             raise Fault(("logId",), "replay 에는 logId 가 필요하다")  # 422 오류를 냄
@@ -351,6 +362,17 @@ class Experiment:
         if self._replay is None and self._run_state == "running":
             raise Conflict("회차가 도는 중에는 재생할 수 없다. 먼저 종료한다")  # 409 오류를 냄
         self.playback(replay)
+        self.renewal()
+
+    # sim·live 사이의 전환. 회차가 도는 중이면 409, 아니면 선택을 기본값으로 돌리고 대기 상태로
+    def switch(self, source: Source, name: str) -> None:
+        if self._run_state == "running":
+            raise Conflict("회차가 도는 중에는 입력원을 바꿀 수 없다. 먼저 종료한다")  # 409
+        self.source = source
+        self._data_source = name
+        self.rest()
+        self._rain_mm = self._presets[DEFAULT_RAIN]
+        self._blockage = ("none", None)
         self.renewal()
 
     # 기록을 읽어 재생 입력원을 만듦(조작 값은 지금 구성으로 봄)
@@ -497,8 +519,9 @@ class Experiment:
         received_at = self.clock.now()
         observations: list[dict] = []
         readings: dict[str, float] = {}  # 유효한 관측 수위(m)
+        absent = self._absent  # 마지막 메시지에서 absent 였던 구역
         for message in self.source.inbox(elapsed, cond):
-            levels, drained_m3, quality = self.reading(message)
+            levels, drained_m3, quality, absent = self.reading(message)
             observations.append(
                 observation(elapsed, received_at, message, levels, drained_m3, quality)
             )
@@ -508,19 +531,20 @@ class Experiment:
         if readings:
             state, corrections = adjustment(state, readings, self._gain, self._params)
         latest = {**self._latest, **{z: (h, elapsed) for z, h in readings.items()}}
-        snapshot = self.capture(state, elapsed, latest)
+        snapshot = self.capture(state, elapsed, latest, absent)
         record = frame(snapshot, state, corrections)
         if self._replay is None:  # 재생이 아닐 때만 씀(재생도 줄은 만들어 계약을 검사)
             with shield():  # 입출력 오류는 503 으로
                 lines = [*observations, record]  # obs 줄들과 state 줄을 한 tick 에 함께
                 self.experiment_log.batch(self._experiment_id, lines)  # 다 쓰이거나 하나도 안 쓰임
-        self._state, self._latest, self._snapshot = state, latest, snapshot
+        self._state, self._latest, self._absent = state, latest, absent
+        self._snapshot = snapshot
         self._ticks += 1
 
-    # 관측 메시지를 A·B 수위(m), 배수량(m³), 센서별 품질로 변환. 무효는 None
+    # 관측 메시지를 A·B 수위(m), 배수량(m³), 센서별 품질, absent 구역으로 변환. 무효는 None
     def reading(
         self, message: dict
-    ) -> tuple[dict[str, float | None], float | None, dict[str, str]]:
+    ) -> tuple[dict[str, float | None], float | None, dict[str, str], frozenset[str]]:
         msg = Message.model_validate(message)
         levels: dict[str, float | None] = {}  # 구역별 수위(m)
         quality: dict[str, str] = {}
@@ -536,7 +560,8 @@ class Experiment:
         if weight is not None and msg.sensorStatus.load == "ok" and math.isfinite(weight):
             drained_m3 = drainage(weight, self._load)
         quality["load"] = "invalid" if drained_m3 is None else "valid"
-        return levels, drained_m3, quality
+        absent = frozenset(z for z in OBSERVED_ZONES if getattr(msg.sensorStatus, z) == "absent")
+        return levels, drained_m3, quality, absent
 
     # 스냅샷을 새로 만들어 표시값을 갱신
     def renewal(self) -> None:
@@ -545,8 +570,13 @@ class Experiment:
 
     # 상태와 경과 시간으로 스냅샷을 만듦
     def capture(
-        self, state: State, elapsed_s: float, latest: dict[str, tuple[float, float]]
+        self,
+        state: State,
+        elapsed_s: float,
+        latest: dict[str, tuple[float, float]],
+        absent: frozenset[str] | None = None,  # absent 구역(없으면 마지막 메시지의 것)
     ) -> Snapshot:
+        absent = self._absent if absent is None else absent
         cond = self.conditions
         prediction = forecast(
             state,
@@ -583,9 +613,45 @@ class Experiment:
             blockage_type=kind,
             blockage_location=location,
             blockage_label=self.outlet(),
-            devices=dict(SIM_DEVICES),
-            quality="valid",
+            devices=self.roster(),
+            quality=self.grade(elapsed_s, latest, absent),
         )
+
+    # 장치 메시지를 받아 둠(입력원이 live 일 때 다음 tick 에 쓰임). 모르는 장치는 422
+    def intake(self, message: dict) -> None:
+        device = message["deviceId"]
+        if device not in self._allowed:
+            known = ", ".join(self._allowed)  # 허용 장치 목록(글자)
+            raise Fault(("deviceId",), f"모르는 장치: {device} (있는 것: {known})")  # 422
+        self._seen[device] = self.clock.monotonic()
+        self._live.admit(message)
+        if self._run_state != "running":
+            self.renewal()  # 대기·정지 중에도 장치 상태를 새로 봄
+
+    # 장치 상태. live 는 마지막 수신 뒤 offline_after_s 부터 offline, 그 밖은 시뮬레이션 값
+    def roster(self) -> dict[str, str]:
+        if self._data_source != "live":
+            return dict(SIM_DEVICES)
+        now = self.clock.monotonic()
+        devices = {}
+        for device in self._allowed:
+            fresh = device in self._seen and now - self._seen[device] < self._offline_after_s
+            devices[device] = "online" if fresh else "offline"
+        return {**devices, "floatSwitch": "unknown", "emergencyStop": "unknown"}  # 메시지에 없음
+
+    # 입력 품질. live 는 기대 센서(absent 가 아닌 A·B)의 마지막 유효 관측 나이로 판정
+    def grade(
+        self, elapsed_s: float, latest: dict[str, tuple[float, float]], absent: frozenset[str]
+    ) -> str:
+        if self._data_source != "live":
+            return "valid"
+        expected = [z for z in OBSERVED_ZONES if z not in absent]  # 기대하는 센서
+        ages = [elapsed_s - latest[z][1] if z in latest else math.inf for z in expected]
+        if ages and all(age <= self._max_age_s for age in ages):
+            return "valid"
+        if all(age >= self._invalid_after_s for age in ages):  # 기대 센서가 없어도 invalid
+            return "invalid"
+        return "degraded"
 
     # 화면에 보일 강우 이름
     def weather(self) -> str:

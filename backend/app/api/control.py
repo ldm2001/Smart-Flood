@@ -5,6 +5,8 @@ from app.schemas import (
     Clog,
     Feed,
     Kickoff,
+    Message,
+    Receipt,
     Shower,
 )
 from fastapi import APIRouter
@@ -54,7 +56,14 @@ async def clog(service: ServiceDep, body: Clog) -> Board:
 
 
 @router.post("/source", response_model=Board)
-# 입력원(sim·replay)을 변환
+# 입력원(sim·replay·live)을 변환
 async def channel(service: ServiceDep, body: Feed) -> Board:
     service.channel(body.mode, body.logId)
     return Board.snapshot(service.snapshot)
+
+
+@router.post("/ingest", response_model=Receipt)
+# 장치 메시지를 받음(입력원이 live 일 때 다음 tick 에 쓰임)
+async def intake(service: ServiceDep, body: Message) -> Receipt:
+    service.intake(body.model_dump())
+    return Receipt(deviceId=body.deviceId, seq=body.seq, dataSource=service.snapshot.data_source)

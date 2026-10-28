@@ -15,7 +15,6 @@ from app.service import (
     Conflict,
     Experiment,
     Fault,
-    Lack,
     Outage,
 )
 from contextlib import asynccontextmanager, suppress
@@ -81,11 +80,6 @@ def factory(
     async def fault(request: Request, error: Fault) -> JSONResponse:
         detail = [{"loc": ["body", *error.loc], "msg": error.message, "type": "value_error"}]
         return JSONResponse(status_code=422, content={"detail": detail})
-
-    @app.exception_handler(Lack)  # 미지원(Lack) 처리기
-    # 미지원 오류를 501 응답으로 변환
-    async def lack(request: Request, error: Lack) -> JSONResponse:
-        return JSONResponse(status_code=501, content={"detail": str(error)})
 
     @app.exception_handler(Conflict)  # 충돌(Conflict) 처리기
     # 충돌 오류를 409 응답으로 변환

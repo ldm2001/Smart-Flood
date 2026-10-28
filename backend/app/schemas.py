@@ -271,6 +271,13 @@ class Message(Intake):
     sensorStatus: Status  # 센서 상태
 
 
+# 장치 메시지의 영수증(POST /api/ingest 응답)
+class Receipt(Response):
+    deviceId: str  # 받은 장치 ID
+    seq: int  # 받은 메시지 순번
+    dataSource: str  # 받은 시점의 입력원. live 가 아니면 메시지는 쓰이지 않음
+
+
 
 # NaN·무한대를 'nan'·'inf' 글자로 변환(JSON 에 못 씀)
 def encoding(value):
