@@ -232,6 +232,21 @@ def test_distance_outside_range_is_invalid(probe, edge):
     assert waterline(edge(probe), probe) is None  # 무효(None)여야 함
 
 
+# 설치 높이보다 먼 거리(바닥 아래)는 범위 안이면 수위 0 인지 검사. 설정값에 기대지 않고 센서를 만듦
+def test_distance_beyond_the_install_height_reads_as_dry():
+    sensor = Sensor(
+        install_height_mm=600.0, zero_offset_mm=0.0, scale=1.0,
+        min_range_mm=200.0, max_range_mm=650.0,  # 최대 범위가 설치 높이보다 멂
+    )
+    assert waterline(601.0, sensor) == 0.0
+    assert waterline(650.0, sensor) == 0.0
+
+
+# 센서 보정값이 유한하지 않으면 수위도 NaN 으로 남는지 검사(0 으로 바뀌면 뒤에서 거를 수 없음)
+def test_a_nan_sensor_value_keeps_the_level_nan(probe):
+    assert math.isnan(waterline(412.0, replace(probe, install_height_mm=math.nan)))
+
+
 # 영점 보정값과 배율이 적용되는지 검사
 def test_zero_offset_and_scale_apply(probe):
     sensor = replace(probe, zero_offset_mm=5.0, scale=1.1)

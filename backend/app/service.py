@@ -364,6 +364,7 @@ class Experiment:
                 raise Flaw(f"meta 의 실험 ID {replay.experiment_id} 가 파일과 다르다")
             for command in replay.commands:
                 self.screen(command)
+            self.span(replay)  # 마지막 tick 의 시각이 만들어지는지 확인
         except Absence:
             raise Fault(("logId",), f"그런 실험 기록이 없다: {log_id}") from None  # 422 로 변환
         except Flaw as error:
@@ -379,6 +380,17 @@ class Experiment:
                 self.jam(*command.blockage)
         except Fault as error:
             raise Flaw(f"{command.line}번째 줄: {error.message}") from None
+
+    # 기록 끝 다음의 tick 경계 시각이 만들어지는지 확인. 시작 시각이 늦거나 경과 초가 크면 넘침
+    def span(self, replay: Replay) -> None:
+        try:
+            last_s = math.ceil(replay.end_s / self._period_s) * self._period_s  # 마지막 tick 의 초
+            replay.start_time + timedelta(seconds=last_s)
+        except OverflowError:
+            start = replay.start_time.isoformat()  # 시작 시각(KST, 글자)
+            end = f"{replay.end_s:g}"  # 기록 끝의 경과 초(글자)
+            reason = f"startTime {start} 에서 기록 끝 {end} 초 뒤의 tick 시각을 만들 수 없다"
+            raise Flaw(reason) from None
 
     # 기록의 처음에서 재생을 시작(시작 시각은 기록의 것)
     def playback(self, replay: Replay) -> None:
@@ -500,8 +512,8 @@ class Experiment:
         record = frame(snapshot, state, corrections)
         if self._replay is None:  # 재생이 아닐 때만 씀(재생도 줄은 만들어 계약을 검사)
             with shield():  # 입출력 오류는 503 으로
-                for line in (*observations, record):  # obs 줄들과 state 줄을 한 tick 에 함께
-                    self.experiment_log.entry(self._experiment_id, line)  # 실패 tick 은 event 줄만
+                lines = [*observations, record]  # obs 줄들과 state 줄을 한 tick 에 함께
+                self.experiment_log.batch(self._experiment_id, lines)  # 다 쓰이거나 하나도 안 쓰임
         self._state, self._latest, self._snapshot = state, latest, snapshot
         self._ticks += 1
 

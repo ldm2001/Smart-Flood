@@ -269,6 +269,13 @@ def patch(kind: str, **values):
     return alteration
 
 
+# 재생 못 하는 기록 만듦: 끝(0.5 초)은 되지만 다음 tick 경계(1 초)는 넘치는 시작 시각
+def brink(records):
+    last = next(r for r in records if r["type"] == "state")  # state 줄 하나가 기록의 끝
+    late = {**records[0], "startTime": "9999-12-31T23:59:59.200000+09:00"}  # 1 초 뒤는 못 만듦
+    return [late, records[1], {**last, "elapsedSec": 0.5}]  # meta, 0 초 start, 0.5 초 state
+
+
 # 재생을 거부하면 422 와 이유가 오고 상태는 그대로인지 확인하는 도우미
 def refusal(client, log_id: str, message: str) -> None:
     before = client.get("/api/state").json()
@@ -312,6 +319,7 @@ BAD_LOGS = {
         {**records[0], "startTime": "9999-12-31T23:59:59+00:00"},
         *records[1:],  # 나머지는 그대로 둠
     ],
+    "late-start-for-the-last-tick": brink,  # 기록 끝은 넘지 않지만 마지막 tick 경계는 넘침
 }
 
 

@@ -8,7 +8,7 @@ const frame = (e: number) => demo(BASE + e * 1000, THRESHOLDS);
 const notice = (snapshot: Snapshot, zone: Zone) => snapshot.alerts.find((alert) => alert.zone === zone);
 
 // 기준 시뮬레이션을 그대로 옮긴 비교 값(보통 강우, 부분 막힘)
-function legacy(seconds: number) {
+function steps(seconds: number) {
   const amount = (value: number) => Number(Math.max(0, value).toFixed(2));
   const rain = 0.7;
   const drain = 0.45;
@@ -36,9 +36,9 @@ describe("demo", () => {
     }
   });
 
-  it("matches the legacy step-by-step simulation", () => {
+  it("matches the step-by-step simulation", () => {
     for (let e = 0; e < MOCK_CYCLE_SEC; e += 1) {
-      const { zones, rates } = legacy(e);
+      const { zones, rates } = steps(e);
       const snapshot = frame(e);
       for (const id of ["A", "B", "C"] as const) {
         expect(snapshot.zones[id].levelMm, `${id} e=${e}`).toBe(zones[id]);
@@ -53,7 +53,7 @@ describe("demo", () => {
     expect(frame(42)).toEqual(frame(42));
   });
 
-  it("starts from the legacy levels", () => {
+  it("starts from the first levels", () => {
     const first = frame(0);
     expect(first.elapsedSec).toBe(0);
     expect([first.zones.A.levelMm, first.zones.B.levelMm, first.zones.C.levelMm]).toEqual([12, 8, 4]);
@@ -125,6 +125,7 @@ describe("demo", () => {
     ]);
     expect(snapshot.blockage).toEqual({ location: "INLET-02", type: "partial", label: "빗물받이 ② 부분 막힘" });
     expect(snapshot.outputsLocked).toBe(true);
+    expect(snapshot.predictionMeta?.modelVersion).toBe("mock-sim");
   });
 
   it("lists only the blocked inlet in the prediction assumptions, like the server", () => {

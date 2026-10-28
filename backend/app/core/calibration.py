@@ -39,11 +39,12 @@ class Load:
         return cls(tare_g=float(cfg["tare_g"]))
 
 
-# 센서 거리(mm)를 수위(m)로 변환. 무효면 None
+# 센서 거리(mm)를 수위(m)로 변환. 무효면 None, 설치 높이보다 먼 거리(바닥 아래)는 0
 def waterline(dist_mm: float, sensor: Sensor) -> float | None:
     if not (math.isfinite(dist_mm) and sensor.min_range_mm <= dist_mm <= sensor.max_range_mm):
         return None
-    return (sensor.install_height_mm - dist_mm - sensor.zero_offset_mm) * sensor.scale / 1000.0
+    level_m = (sensor.install_height_mm - dist_mm - sensor.zero_offset_mm) * sensor.scale / 1000.0
+    return 0.0 if level_m < 0.0 else level_m  # 음수(바닥 아래)만 0. NaN 은 그대로(뒤에서 거름)
 
 
 # 수위(m)를 센서 거리(mm)로 되돌림(위 변환의 역)

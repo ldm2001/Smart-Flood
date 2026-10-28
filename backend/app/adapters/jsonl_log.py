@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from app.ports.experiment_log import EXPERIMENT_ID, Absence, Flaw
 from collections.abc import Iterator
 from pathlib import Path
@@ -21,20 +22,20 @@ class Jsonl:
     # 회차 파일 끝에 여러 건을 붙임. 다 쓰이거나 하나도 안 쓰임
     def batch(self, experiment_id: str, records: list[dict]) -> None:
         path = self.path(experiment_id)
+        if not records:  # 쓸 것이 없으면 파일도 만들지 않음(빈 파일이 회차 번호를 먹지 않게)
+            return
         body = "".join(dump(record) for record in records).encode("utf-8")  # 먼저 글자로 변환
         self.directory.mkdir(parents=True, exist_ok=True)
-        fresh = not path.is_file()  # 이 쓰기가 파일을 새로 만드는지 확인
-        with path.open("ab") as f:  # 파일을 바이트 이어쓰기로 엶(쓸 때마다 열고 닫음)
-            mark = f.tell()
-            try:
+        mark = None  # 쓰기 전 파일 끝(열지 못했으면 None)
+        try:
+            with path.open("ab") as f:  # 파일을 바이트 이어쓰기로 엶(쓸 때마다 열고 닫음)
+                mark = f.tell()
                 f.write(body)
                 f.flush()
-            except OSError:
-                if fresh:  # 이번에 만든 파일이면 통째로 지움(회차 번호를 먹지 않게)
-                    path.unlink(missing_ok=True)
-                else:
-                    f.truncate(mark)  # 쓰기 전 끝으로 되돌림
-                raise  # 오류를 그대로 올림
+        except OSError:
+            if mark is not None:
+                rollback(path, mark)  # 닫힌 뒤에 되돌림(버퍼 재전송이 또 실패해도 되돌릴 수 있게)
+            raise  # 오류를 그대로 올림
 
     # 기록이 있는 회차 ID 를 날짜·번호 순으로 반환
     def index(self) -> list[str]:
@@ -64,6 +65,14 @@ class Jsonl:
 # 기록 한 건을 JSON 한 줄로 변환
 def dump(record: dict) -> str:
     return json.dumps(record, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n"
+
+
+# 실패한 쓰기를 되돌림. 쓰기 전 끝으로 자르고, 그러면 빈 파일이면 지움(회차 번호를 먹지 않게)
+def rollback(path: Path, mark: int) -> None:
+    if mark == 0:
+        path.unlink(missing_ok=True)
+    else:
+        os.truncate(path, mark)
 
 
 # ID 를 (날짜, 번호) 정렬 기준으로 변환
