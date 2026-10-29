@@ -1,6 +1,6 @@
 # firmware
 
-ESP32 DevKitC V4 펌웨어다. `board/` 가 설계서 REV16 의 본 펌웨어(수위 측정, 강우 흉내, 침수 예측 알림, 서버 전송)다. `parts/` 는 부품 한 개씩 켜 보는 시험 스케치, `node/` 는 REV15 구성(초음파·로드셀·버튼)을 모두 붙인 통합 시험이다.
+ESP32 DevKitC V4 펌웨어다. `board/` 가 설계서 REV16 의 본 펌웨어(수위 측정, 강우 흉내, 침수 예측 알림, 서버 전송)다. `parts/` 는 부품 한 개씩 켜 보는 시험 스케치, `node/` 는 REV15 구성(초음파·로드셀·버튼)을 모두 붙인 통합 시험이다. `python/` 은 같은 보드의 MicroPython 판으로, 아직 1단계(수위 측정과 서버 전송)만 있다.
 
 어느 스케치도 아직 ESP32 로 컴파일하거나 보드에서 돌려 보지 않았다. `board/` 는 맥에서 Arduino API 대역을 붙여 로직만 돌려 보았다(아래 "확인한 것"). 컴파일 오류가 나면 오류 줄을 그대로 적어 두고 고친다.
 
@@ -62,6 +62,67 @@ REV15 부품(푸시 버튼 GPIO25, JSN-SR04T GPIO5·18, HX711 GPIO32·33)은 REV
 ### 확인한 것
 
 맥에서 WiFi·HTTPClient·WebServer·Preferences·ADC 의 대역을 만들어 `board.ino` 를 C++ 로 컴파일하고, `setup()`·`loop()` 를 가짜 시계(100 ms)와 가짜 수위로 돌렸다. 통과한 것: 부팅 직후 릴레이 꺼짐(고임피던스), `secrets.h` 가 없으면 와이파이·관제 화면·전송 없음, 1초마다 전송과 `seq` 증가, 전송 본문 1101건이 서버의 `Message` 스키마와 live 모드 `/api/ingest` 를 통과, 강우 회차에서 A·B 순서 침수와 경보 선행 약 100초, 최대 수위 정지, 플로트 100 ms 정지, 센서 이상 정지와 `null` 전송, 수동 60초 정지, 설정 저장·재로드, 두 점 보정. 대역은 직접 만든 것이라 ESP32 코어 API 의 이름과 시그니처는 확인되지 않았다. 보드에서 처음 컴파일할 때 오류가 날 수 있다.
+
+## python 노드(MicroPython)
+
+`python/` 은 같은 ESP32 에서 돌아가는 MicroPython 판이다. 1단계 범위는 수위 읽기와 1초마다 `POST /api/ingest` 전송까지다. 펌프 제어·20초 기울기 예측·주의/경계 단계·관제 화면·ntfy 는 아직 `board/` 스케치에만 있다. 릴레이 핀(GPIO26)은 입력으로 두어 펌프가 켜지지 않는다.
+
+파일은 두 층이다. 순수 모듈은 맥에서 pytest 로 돌고, 보드 층만 ESP32 API 를 쓴다. 공용 모듈은 MicroPython 에서도 돌아야 하므로 f-string·typing·dataclass 를 쓰지 않는다.
+
+| 파일 | 뜻 | 어디서 도는가 |
+|---|---|---|
+| `level.py` | 전압(mV)→수위(mm) 직선, 센서 이상 범위(300~2800 mV), 100 ms 이동평균, `cal1`·`cal2`·`calreset` 과 같은 보정 | 맥·보드 |
+| `ingest.py` | 서버 `/api/ingest` 메시지. `distA_mm = 600 - 수위`, 이상이면 `null`·`fault` | 맥·보드 |
+| `client.py` | `socket` 만 쓰는 HTTP POST. 연결·응답 각 400 ms 제한, http 만 | 맥·보드 |
+| `node.py` | 100 ms 표본·1 s 전송 루프. 시각·ADC·전송은 보드 객체가 준다 | 맥·보드 |
+| `main.py` | ESP32 보드 층. ADC(GPIO34) 64회 평균, 와이파이 접속, 감시 타이머 8초, 부팅 시 자동 실행 | 보드 |
+| `host.py` | 맥 실행기. 가짜 수위나 표준입력의 mV 로 같은 루프를 돌려 서버에 보낸다 | 맥 |
+| `secret.py.example` | 접속 정보 견본. `secret.py` 로 복사해 채운다. `secret.py` 는 저장소에 올리지 않는다 | - |
+
+부품 시험 1~6 은 그대로 `parts/` 스케치로 한다. 8(서버 연동)은 `python/` 으로도 할 수 있고, 7(펌프 제어)은 아직 `board/` 만 된다.
+
+### 맥에서 시험
+
+```bash
+cd firmware/python
+python3 -m pytest -q && ruff check .
+```
+
+보드 없이 서버 경로를 미리 확인하려면 서버를 띄우고 live 로 바꾼 뒤("서버에 닿게 하기") 실행기를 돌린다. `--mm` 은 가짜 수위(mm), `--ramp` 는 초당 변화(mm/s), `--seconds` 는 보낼 횟수다. `--server` 를 비우면 서버 없이 메시지를 한 줄씩 찍는다.
+
+```bash
+python3 host.py --server http://localhost:8000 --mm 40 --ramp 0.5 --seconds 30
+python3 host.py --mm 40 --seconds 3
+```
+
+시리얼 등에서 mV 값이 한 줄씩 들어오면 `--stdin` 으로 그 값을 센서 값으로 쓴다(첫 토큰이 숫자인 줄만 읽는다).
+
+### 보드에 올리기
+
+도구와 MicroPython 펌웨어는 사람이 설치한다. 아래는 보드를 꽂은 뒤 한 번만 한다. `.bin` 은 micropython.org 의 ESP32_GENERIC 다운로드 페이지에서 받고, 파일명은 받은 판으로 바꾼다. esptool 새 판은 명령 이름이 `esptool` 이다.
+
+```bash
+python3 -m pip install esptool mpremote
+ls /dev/cu.*                                   # cu.usbserial-… 또는 cu.SLAB_USBtoUART
+esptool.py --chip esp32 --port /dev/cu.usbserial-XXXX erase_flash
+esptool.py --chip esp32 --port /dev/cu.usbserial-XXXX --baud 460800 write_flash -z 0x1000 ESP32_GENERIC-<판>.bin
+```
+
+그다음 코드를 올린다. `main.py` 는 부팅마다 자동으로 돈다.
+
+```bash
+cd firmware/python
+cp secret.py.example secret.py                 # STA_SSID·STA_PASS·SERVER_URL 채움
+mpremote connect /dev/cu.usbserial-XXXX cp level.py ingest.py client.py node.py main.py secret.py :
+mpremote connect /dev/cu.usbserial-XXXX reset
+mpremote connect /dev/cu.usbserial-XXXX repl    # 전송 실패가 있으면 여기 찍힌다. Ctrl-] 로 나감
+```
+
+`secret.py` 가 없거나 `SERVER_URL`·`STA_SSID` 가 비면 와이파이에 붙지 않고 메시지를 REPL 에만 찍는다. 보드를 남에게 넘길 때는 `mpremote rm :secret.py` 로 지운다.
+
+### 확인한 것
+
+맥에서 pytest 36건(변환·보정·메시지·HTTP 클라이언트·루프 타이밍·실행기)과 ruff 가 통과했다. `main.py` 는 `machine`·`network`·`time.ticks_*` 대역을 붙여 CPython 에서 3회 전송까지 돌렸다: 릴레이 핀이 입력으로 설정되고 핀 출력이 없으며, `seq` 0·1·2 가 `/api/ingest` 로 가고, 감시 타이머가 표본마다 먹여진다. `host.py` 로 로컬 서버(live)에 4초 보내 `/api/state` 의 `devices.esp32_1` 이 online, A 구역 `levelMm` 40.0·`source` measured 가 되는 것을 확인했다. MicroPython 실제 API(`ADC.read_uv`, `WDT`, `network.WLAN`)는 보드에서 아직 돌려 보지 않았다.
 
 ## 순서
 
