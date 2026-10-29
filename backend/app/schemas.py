@@ -15,6 +15,7 @@ CONTRACT_HORIZONS_S = (10, 20, 30)  # predictions 의 키: 10·20·30 초
 M_TO_MM = 1000.0  # m → mm 변환 계수(단위 변환은 여기서만)
 M3_TO_L = 1000.0  # m³ → L 변환 계수
 M3S_TO_L_PER_MIN = 60_000.0  # m³/s → L/min 변환 계수
+RATE_LIMIT_MM_S = 20.0  # 변화율(mm/s) 계약 범위 ±20. 넘는 모델 값은 응답에서 포화
 KST_OFFSET = timedelta(hours=9)  # 한국 표준시 +09:00
 
 
@@ -34,6 +35,11 @@ def number(**bounds: float):
     return Annotated[float, Field(strict=True, **bounds)]  # 엄격 모드에 범위(ge·le·gt)를 붙임
 
 
+# 변화율 m/s → mm/s. 계약 범위 ±20 을 넘으면 그 끝값으로 포화
+def rate(value_m_per_s: float) -> float:
+    return max(-RATE_LIMIT_MM_S, min(RATE_LIMIT_MM_S, value_m_per_s * M_TO_MM))
+
+
 KstTime = Annotated[str, AfterValidator(stamp)]
 Level = number(ge=0, le=500)  # 수위(mm) 0~500. 벗어나면 잘라 내지 않고 검증 실패
 Elapsed = number(ge=0, le=864_000)  # 경과 시간(초) 0~864000
@@ -51,7 +57,7 @@ class Response(BaseModel):
 # 구역 하나의 측정값
 class Zone(Response):
     levelMm: Level  # 수위(mm)
-    rateMmSec: number(ge=-20, le=20)  # 수위 변화율(mm/s) -20~20
+    rateMmSec: number(ge=-RATE_LIMIT_MM_S, le=RATE_LIMIT_MM_S)  # 수위 변화율(mm/s) -20~20
     source: Literal["measured", "simulated", "estimated", "replay"]  # 실측·가상 실측·모델 추정·재생
 
 
@@ -162,7 +168,7 @@ class Board(Response):
                 "zones": {
                     z: {
                         "levelMm": s.levels_m[z] * M_TO_MM,  # 수위 m → mm
-                        "rateMmSec": s.rates_m_per_s[z] * M_TO_MM,  # 변화율 m/s → mm/s
+                        "rateMmSec": rate(s.rates_m_per_s[z]),  # 변화율 mm/s, ±20 포화
                         "source": s.zone_sources[z],
                     }
                     for z in ZONES

@@ -76,6 +76,18 @@ def test_live_reading_shows_as_measured(client, clock, service, config):
     assert (zones["B"]["source"], zones["C"]["source"]) == ("estimated", "estimated")
 
 
+# live 수위가 모델 평형보다 훨씬 높아도 회차가 멈추지 않고 변화율이 계약 범위(±20) 안인지 검사
+def test_live_level_far_above_the_model_keeps_the_run_going(client, clock, service, config):
+    client.post("/api/source", json=LIVE)
+    client.post(START, json={})
+    for seq in range(1, 4):  # 보정이 모델 상태를 관측까지 끌어올리는 데 몇 tick 걸림
+        client.post("/api/ingest", json=message(config, seq, a_mm=90.0))
+        lapse(clock, service, 1)
+    body = client.get("/api/state").json()
+    assert body["runState"] == "running"
+    assert all(-20 <= zone["rateMmSec"] <= 20 for zone in body["zones"].values())
+
+
 # 장치 상태: 마지막 수신 뒤 5초 전이면 online, 5초부터 offline. 안 보내는 esp32_2 는 offline
 def test_devices_follow_the_last_receipt(client, clock, service, config):
     client.post("/api/source", json=LIVE)
