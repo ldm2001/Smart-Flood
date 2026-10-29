@@ -29,8 +29,9 @@ def fake(start_mm, ramp_mm, clock=time.monotonic):
     return read
 
 
-# 줄 흐름(표준입력)에서 첫 토큰이 숫자인 줄만 mV 로 읽는 읽기 함수. 줄이 올 때까지 기다리고,
-# 흐름이 끝나면 마지막 값을 유지함(처음부터 없으면 0 mV = 센서 이상)
+# 줄 흐름(표준입력)을 mV 로 읽는 읽기 함수. "482 mV" 처럼 mV 토큰이 있으면 그 앞 숫자,
+# 없으면 첫 토큰이 숫자인 줄만 받음. 줄이 올 때까지 기다리고, 흐름이 끝나면 마지막 값을
+# 유지함(처음부터 없으면 0 mV = 센서 이상)
 def lines(stream):
     last = [0.0]
 
@@ -39,8 +40,11 @@ def lines(stream):
             parts = text.split()
             if not parts:
                 continue
+            token = parts[0]
+            if "mV" in parts[1:]:
+                token = parts[parts.index("mV") - 1]
             try:
-                last[0] = float(parts[0])
+                last[0] = float(token)
             except ValueError:
                 continue
             break
@@ -52,7 +56,9 @@ def lines(stream):
 # 명령행 선택지
 def options(argv):
     parser = argparse.ArgumentParser(description="맥에서 센서 노드를 돌려 서버로 보냄")
-    parser.add_argument("--server", default="", help="서버 주소(끝에 / 없이). 비우면 찍기만 함")
+    parser.add_argument(
+        "--server", default="", type=client.base, help="서버 주소(http://…). 비우면 찍기만 함"
+    )
     parser.add_argument("--mm", type=float, default=40.0, help="가짜 센서 시작 수위(mm)")
     parser.add_argument("--ramp", type=float, default=0.0, help="가짜 센서 수위 변화(mm/s)")
     parser.add_argument("--stdin", action="store_true", help="표준입력의 mV 줄을 센서 값으로 읽음")

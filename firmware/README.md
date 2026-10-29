@@ -65,13 +65,13 @@ REV15 부품(푸시 버튼 GPIO25, JSN-SR04T GPIO5·18, HX711 GPIO32·33)은 REV
 
 ## python 노드(MicroPython)
 
-`python/` 은 같은 ESP32 에서 돌아가는 MicroPython 판이다. 1단계 범위는 수위 읽기와 1초마다 `POST /api/ingest` 전송까지다. 펌프 제어·20초 기울기 예측·주의/경계 단계·관제 화면·ntfy 는 아직 `board/` 스케치에만 있다. 릴레이 핀(GPIO26)은 입력으로 두어 펌프가 켜지지 않는다.
+`python/` 은 같은 ESP32 에서 돌아가는 MicroPython 판이다. 1단계 범위는 수위 읽기와 1초마다 `POST /api/ingest` 전송까지다. 펌프 제어·보정 명령(`cal1`·`cal2`·`calreset`)·20초 기울기 예측·주의/경계 단계·관제 화면·ntfy 는 아직 `board/` 스케치에만 있다. 릴레이 핀(GPIO26)은 입력으로 두어 펌프가 켜지지 않는다.
 
 파일은 두 층이다. 순수 모듈은 맥에서 pytest 로 돌고, 보드 층만 ESP32 API 를 쓴다. 공용 모듈은 MicroPython 에서도 돌아야 하므로 f-string·typing·dataclass 를 쓰지 않는다.
 
 | 파일 | 뜻 | 어디서 도는가 |
 |---|---|---|
-| `level.py` | 전압(mV)→수위(mm) 직선, 센서 이상 범위(300~2800 mV), 100 ms 이동평균, `cal1`·`cal2`·`calreset` 과 같은 보정 | 맥·보드 |
+| `level.py` | 전압(mV)→수위(mm) 직선, 센서 이상 범위(300~2800 mV), 100 ms 이동평균, 1점·2점 보정 직선(스케치 `cal1`·`cal2`·`calreset` 과 같은 식. 명령은 아직 없다) | 맥·보드 |
 | `ingest.py` | 서버 `/api/ingest` 메시지. `distA_mm = 600 - 수위`, 이상이면 `null`·`fault` | 맥·보드 |
 | `client.py` | `socket` 만 쓰는 HTTP POST. 연결·응답 각 400 ms 제한, http 만 | 맥·보드 |
 | `node.py` | 100 ms 표본·1 s 전송 루프. 시각·ADC·전송은 보드 객체가 준다 | 맥·보드 |
@@ -95,7 +95,7 @@ python3 host.py --server http://localhost:8000 --mm 40 --ramp 0.5 --seconds 30
 python3 host.py --mm 40 --seconds 3
 ```
 
-시리얼 등에서 mV 값이 한 줄씩 들어오면 `--stdin` 으로 그 값을 센서 값으로 쓴다(첫 토큰이 숫자인 줄만 읽는다).
+시리얼 등에서 mV 값이 한 줄씩 들어오면 `--stdin` 으로 그 값을 센서 값으로 쓴다. 줄에 `mV` 토큰이 있으면 그 바로 앞 숫자를 읽고(`1500 ms raw 615  482 mV` 같은 스케치 출력 그대로), 없으면 첫 토큰이 숫자인 줄만 읽는다. `--server` 끝의 `/` 는 있어도 되고, `http://` 로 시작하지 않으면 시작 전에 거절한다.
 
 ### 보드에 올리기
 
@@ -118,11 +118,11 @@ mpremote connect /dev/cu.usbserial-XXXX reset
 mpremote connect /dev/cu.usbserial-XXXX repl    # 전송 실패가 있으면 여기 찍힌다. Ctrl-] 로 나감
 ```
 
-`secret.py` 가 없거나 `SERVER_URL`·`STA_SSID` 가 비면 와이파이에 붙지 않고 메시지를 REPL 에만 찍는다. 보드를 남에게 넘길 때는 `mpremote rm :secret.py` 로 지운다.
+`secret.py` 가 없거나 `SERVER_URL`·`STA_SSID` 가 비면 와이파이에 붙지 않고 메시지를 REPL 에만 찍는다. `secret.py` 가 깨져 있거나(문법 오류), `SERVER_URL` 이 `http://` 로 시작하지 않거나, 와이파이에 붙지 못해도 멈추지 않고 이유를 한 줄 찍은 뒤 같은 REPL 출력으로 넘어간다. `SERVER_URL` 끝의 `/` 는 있어도 된다. 보드를 남에게 넘길 때는 `mpremote rm :secret.py` 로 지운다.
 
 ### 확인한 것
 
-맥에서 pytest 36건(변환·보정·메시지·HTTP 클라이언트·루프 타이밍·실행기)과 ruff 가 통과했다. `main.py` 는 `machine`·`network`·`time.ticks_*` 대역을 붙여 CPython 에서 3회 전송까지 돌렸다: 릴레이 핀이 입력으로 설정되고 핀 출력이 없으며, `seq` 0·1·2 가 `/api/ingest` 로 가고, 감시 타이머가 표본마다 먹여진다. `host.py` 로 로컬 서버(live)에 4초 보내 `/api/state` 의 `devices.esp32_1` 이 online, A 구역 `levelMm` 40.0·`source` measured 가 되는 것을 확인했다. MicroPython 실제 API(`ADC.read_uv`, `WDT`, `network.WLAN`)는 보드에서 아직 돌려 보지 않았다.
+맥에서 pytest 47건(변환·보정·메시지·HTTP 클라이언트·루프 타이밍·실행기·보드 층)과 ruff 가 통과했다. 보드 층 `main.py` 는 `tests/test_main.py` 가 `machine`·`network`·`time.ticks_*` 대역을 끼워 CPython 에서 돌린다: 릴레이 핀이 입력으로 설정되고 핀 출력이 없으며, `seq` 0·1·2 가 `/api/ingest` 로 가고, 감시 타이머가 표본마다 먹여지며, 와이파이 실패·깨진 `secret.py`·잘못된 `SERVER_URL` 에서는 REPL 출력으로 넘어간다. `host.py` 로 로컬 서버(live)에 4초 보내 `/api/state` 의 `devices.esp32_1` 이 online, A 구역 `levelMm` 40.0·`source` measured 가 되는 것을 확인했다. MicroPython 실제 API(`ADC.read_uv`, `WDT`, `network.WLAN`)는 보드에서 아직 돌려 보지 않았다.
 
 ## 순서
 

@@ -16,6 +16,22 @@ def parse(url):
     return host, int(port) if port else 80, path
 
 
+# 설정의 서버 주소 정리: 양끝 공백과 끝 / 를 떼고, 비면 "" 그대로. http:// 가 아니면 ValueError
+def base(url):
+    url = url.strip().rstrip("/")
+    if url and not url.startswith("http://"):
+        raise ValueError("http:// 주소만 받음: " + url)
+    return url
+
+
+# 이름을 풀어 IPv4 주소를 고름. localhost 처럼 IPv6(::1)가 먼저 나오는 이름도 닿게 함
+def address(host, port):
+    for entry in socket.getaddrinfo(host, port):
+        if entry[0] == socket.AF_INET:
+            return entry[-1]
+    raise OSError("IPv4 주소 없음: " + host)
+
+
 # JSON 본문을 POST 하고 응답 상태 코드를 돌려줌. 연결과 응답 읽기가 각각 timeout_s 안에 끝나야 함
 def post(url, body, timeout_s=0.4):
     host, port, path = parse(url)
@@ -27,7 +43,7 @@ def post(url, body, timeout_s=0.4):
     sock = socket.socket()
     sock.settimeout(timeout_s)
     try:
-        sock.connect(socket.getaddrinfo(host, port)[0][-1])
+        sock.connect(address(host, port))
         sock.sendall(head.encode() + data)
         line = b""
         while b"\n" not in line:

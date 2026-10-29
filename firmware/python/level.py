@@ -32,9 +32,9 @@ class Line:
         return Line()
 
 
-# 전압이 센서 정상 범위 밖인지(단선·단락)
+# 전압이 센서 정상 범위 밖인지(단선·단락). NaN 도 이상
 def fault(mv):
-    return mv < FAULT_LOW_MV or mv > FAULT_HIGH_MV
+    return not (FAULT_LOW_MV <= mv <= FAULT_HIGH_MV)
 
 
 # 전압→수위(mm). 음수는 0
@@ -47,8 +47,8 @@ def mean(samples):
     return sum(samples) / len(samples)
 
 
-# 이동평균 한 걸음. 이전 값이 None 이면 새 값으로 시작
+# 이동평균 한 걸음. 이전 값이 None 이나 NaN 이면 새 값으로 시작
 def smooth(previous, mv):
-    if previous is None:
+    if previous is None or previous != previous:
         return mv
     return previous * KEEP + mv * (1.0 - KEEP)

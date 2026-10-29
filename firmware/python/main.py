@@ -17,6 +17,9 @@ try:
     import secret
 except ImportError:
     secret = None
+except Exception as error:  # 문법 오류 등. 보드가 멈추지 않게 알리고 설정 없이 감
+    print("secret.py 오류:", error)
+    secret = None
 
 LEVEL_PIN = 34  # KIT0139 변환보드 출력(ADC1). REV16 핀 배치
 RELAY_PIN = 26  # 펌프 릴레이(active-low). 입력으로 두어 켜지지 않게 함
@@ -85,11 +88,20 @@ class Esp:
 
 
 # 부팅 후 실행. 와이파이와 서버 주소가 있으면 서버로 보내고, 없으면 REPL 에 메시지를 찍음
+# 설정이 잘못되었거나 와이파이가 실패해도 멈추지 않고 이유를 찍은 뒤 REPL 출력으로 넘어감
 def run(cycles=None):
-    server = setting("SERVER_URL")
+    try:
+        server = client.base(setting("SERVER_URL"))
+    except ValueError as error:
+        print("SERVER_URL 오류:", error)
+        server = ""
     ssid = setting("STA_SSID")
     if server and ssid:
-        ip = connect(ssid, setting("STA_PASS"))
+        try:
+            ip = connect(ssid, setting("STA_PASS"))
+        except OSError as error:  # 잘못된 암호 등 드라이버 오류
+            print("wifi 오류:", error)
+            ip = None
         print("wifi", ip if ip else "접속 실패. 서버로 보내지 않고 REPL 에 찍음")
         if ip is None:
             server = ""

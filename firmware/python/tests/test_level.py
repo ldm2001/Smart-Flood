@@ -32,8 +32,16 @@ def test_fault_outside_the_sensor_range(mv, bad):
 def test_point1_moves_the_offset_only():
     line = level.Line().point1(500.0, 0.0)
     assert line.slope == level.SLOPE_THEORY
-    assert level.mm(500.0, line) == 0.0
+    assert line.offset == -level.SLOPE_THEORY * 500.0
+    assert level.mm(600.0, line) == pytest.approx(100.0 * level.SLOPE_THEORY)
     assert line.point == (500.0, 0.0)
+
+
+# NaN 은 센서 이상이고, 이동평균이 NaN 에 머물지 않고 다음 정상 값으로 다시 시작하는지 검사
+def test_nan_is_a_fault_and_does_not_stick():
+    nan = float("nan")
+    assert level.fault(nan) is True
+    assert level.smooth(level.smooth(None, nan), 1000.0) == 1000.0
 
 
 # 2점 보정: 두 점을 지나는 직선이 되는지 검사

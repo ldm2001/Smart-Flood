@@ -31,6 +31,12 @@ def test_lines_without_numbers_give_zero():
     assert host.lines(iter(["x"]))() == 0.0
 
 
+# depth 스케치 출력처럼 mV 앞에 다른 숫자(millis)가 있으면 mV 바로 앞 토큰을 읽는지 검사
+def test_lines_read_the_token_before_mv():
+    read = host.lines(iter(["1500 ms raw 615  482 mV", "1600 ms raw 620  484.5 mV"]))
+    assert (read(), read()) == (482.0, 484.5)
+
+
 # 명령행 선택지와 기본값 검사
 def test_options_have_defaults():
     plain = host.options([])
@@ -38,6 +44,13 @@ def test_options_have_defaults():
     assert (plain.stdin, plain.seconds) == (False, None)
     full = host.options(["--server", "http://h:1", "--mm", "60", "--ramp", "0.5", "--seconds", "3"])
     assert (full.server, full.mm, full.ramp, full.seconds) == ("http://h:1", 60.0, 0.5, 3)
+
+
+# --server 는 끝 슬래시를 떼고, http:// 가 아니면 시작 전에 거절하는지 검사
+def test_options_normalize_the_server():
+    assert host.options(["--server", "http://h:1/"]).server == "http://h:1"
+    with pytest.raises(SystemExit):
+        host.options(["--server", "h:1"])
 
 
 # 서버 주소가 없으면 메시지를 JSON 줄로 찍고, 시각은 시작 기준 ms 인지 검사

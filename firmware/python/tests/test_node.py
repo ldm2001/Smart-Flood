@@ -54,6 +54,16 @@ def test_depth_follows_the_samples():
     assert broken.depth() is None
 
 
+# NaN 표본은 그 메시지를 이상(null)으로 보내고, 다음 정상 표본에서 수위가 돌아오는지 검사
+def test_nan_sample_reports_fault_then_recovers():
+    sensor = node.Node("b")
+    sensor.sample(float("nan"))
+    assert sensor.depth() is None
+    assert sensor.message(0)["sensorStatus"]["A"] == "fault"
+    sensor.sample(480.0)
+    assert sensor.depth() == pytest.approx(10.0)
+
+
 # 메시지마다 순번이 오르고 넘겨준 시각이 들어가는지 검사
 def test_message_counts_up():
     sensor = node.Node("b")
