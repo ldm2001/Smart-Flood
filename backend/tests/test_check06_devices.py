@@ -5,19 +5,26 @@ LIVE = {"mode": "live"}
 START = "/api/experiment/start"
 
 
-# REV16 펌웨어 모양의 메시지. 수위센서는 A 하나, B·로드셀은 absent
+# REV16 펌웨어 모양의 메시지. 수위센서는 A 하나, B·로드셀은 absent(b_mm 을 주면 B 도 ok)
 def message(
-    config, seq: int, *, a_mm: float = 40.0, status: str = "ok", device: str = "esp32_1"
+    config,
+    seq: int,
+    *,
+    a_mm: float = 40.0,
+    status: str = "ok",
+    device: str = "esp32_1",
+    b_mm: float | None = None,
 ) -> dict:
     sensor = Sensor.config(config["sensors"]["A"])
     distance = gap(a_mm / 1000, sensor) if status == "ok" else None  # fault 면 값 없음
+    side = None if b_mm is None else gap(b_mm / 1000, Sensor.config(config["sensors"]["B"]))
     return {
         "deviceId": device,
         "bootId": "b1",
         "seq": seq,
         "tMs": seq * 1000,
-        "readings": {"distA_mm": distance, "distB_mm": None, "weight_g": None},
-        "sensorStatus": {"A": status, "B": "absent", "load": "absent"},
+        "readings": {"distA_mm": distance, "distB_mm": side, "weight_g": None},
+        "sensorStatus": {"A": status, "B": "absent" if b_mm is None else "ok", "load": "absent"},
     }
 
 
@@ -80,6 +87,25 @@ def test_devices_follow_the_last_receipt(client, clock, service, config):
     assert (devices["floatSwitch"], devices["emergencyStop"]) == ("unknown", "unknown")
     lapse(clock, service, 1)
     assert client.get("/api/state").json()["devices"]["esp32_1"] == "offline"
+
+
+# 대기 중에는 tick 이 없어도 마지막 수신 뒤 5초가 지나면 offline 으로 읽히는지 검사
+def test_idle_devices_go_offline_without_a_tick(client, clock, service, config):
+    client.post("/api/source", json=LIVE)
+    client.post("/api/ingest", json=message(config, 1))
+    assert client.get("/api/state").json()["devices"]["esp32_1"] == "online"
+    lapse(clock, service, 5)
+    assert client.get("/api/state").json()["devices"]["esp32_1"] == "offline"
+
+
+# 허용 목록에 esp32_2 가 없어도 응답이 계약 모양(장치 4개)을 지키는지 검사
+def test_devices_keep_the_contract_keys_for_a_short_allowed_list(builder, config):
+    short = {**config, "devices": {**config["devices"], "allowed": ["esp32_1"]}}
+    client = builder(short)
+    client.post("/api/source", json=LIVE)
+    response = client.get("/api/state")
+    assert response.status_code == 200
+    assert response.json()["devices"]["esp32_2"] == "offline"
 
 
 # sim 입력원에서는 메시지를 받아만 두고 상태를 바꾸지 않는지 검사

@@ -168,8 +168,10 @@ class Experiment:
             raise ValueError(f"보정 이득은 0~1 이어야 한다: {self._gain}")
 
     @property  # 속성처럼 읽음(조회)
-    # 최근 스냅샷
+    # 최근 스냅샷. live 의 장치 상태는 읽는 때로 새로 봄(대기 중에는 tick 이 없음)
     def snapshot(self) -> Snapshot:
+        if self._data_source == "live":
+            return replace(self._snapshot, devices=self.roster())
         return self._snapshot
 
     @property
@@ -634,7 +636,7 @@ class Experiment:
             return dict(SIM_DEVICES)
         now = self.clock.monotonic()
         devices = {}
-        for device in self._allowed:
+        for device in ("esp32_1", "esp32_2"):  # 계약의 장치 키. 허용 목록에 없으면 offline
             fresh = device in self._seen and now - self._seen[device] < self._offline_after_s
             devices[device] = "online" if fresh else "offline"
         return {**devices, "floatSwitch": "unknown", "emergencyStop": "unknown"}  # 메시지에 없음

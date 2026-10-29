@@ -32,6 +32,21 @@ def test_quality_follows_the_age_of_the_last_valid_reading(client, clock, servic
     assert seen == ["valid"] * 3 + ["degraded"] * 6 + ["invalid"]
 
 
+# B 가 ok 로 오다 absent 로 바뀌면 더는 B 를 기대하지 않아 A 만으로 valid 가 되는지 검사
+def test_a_sensor_turning_absent_is_no_longer_expected(client, clock, service, config):
+    client.post("/api/source", json=LIVE)
+    client.post(START, json={})
+    client.post("/api/ingest", json=message(config, 1, b_mm=40.0))  # A·B 둘 다 ok
+    lapse(clock, service, 1)
+    assert client.get("/api/state").json()["quality"] == "valid"
+    for _ in range(4):  # 4초 동안 메시지가 없어 A·B 관측이 모두 오래됨
+        lapse(clock, service, 1)
+    assert client.get("/api/state").json()["quality"] == "degraded"
+    client.post("/api/ingest", json=message(config, 2))  # 이제 B 는 absent
+    lapse(clock, service, 1)
+    assert client.get("/api/state").json()["quality"] == "valid"
+
+
 # A 가 fault 인 메시지는 관측으로 치지 않아 품질이 떨어지고 장치는 online 인지 검사
 def test_fault_message_is_not_a_reading(client, clock, service, config):
     client.post("/api/source", json=LIVE)
