@@ -1,8 +1,8 @@
 # firmware
 
-ESP32 DevKitC V4 와 부품을 하나씩 켜 보는 시험 스케치다. `parts/` 는 부품 한 개씩, `node/` 는 전부 붙인 뒤 1초마다 서버 메시지 모양으로 찍는 통합 시험이다. 서버로 보내는 펌웨어(`POST /api/ingest`)는 M4 에서 만든다.
+ESP32 DevKitC V4 펌웨어다. `board/` 가 설계서 REV16 의 본 펌웨어(수위 측정, 강우 흉내, 침수 예측 알림, 서버 전송)다. `parts/` 는 부품 한 개씩 켜 보는 시험 스케치, `node/` 는 REV15 구성(초음파·로드셀·버튼)을 모두 붙인 통합 시험이다.
 
-이 스케치들은 아직 보드에서 돌려 보지 않았다. 컴파일 오류가 나면 오류 줄을 그대로 적어 두고 고친다.
+어느 스케치도 아직 ESP32 로 컴파일하거나 보드에서 돌려 보지 않았다. `board/` 는 맥에서 Arduino API 대역을 붙여 로직만 돌려 보았다(아래 "확인한 것"). 컴파일 오류가 나면 오류 줄을 그대로 적어 두고 고친다.
 
 ## 준비
 
@@ -10,28 +10,58 @@ ESP32 DevKitC V4 와 부품을 하나씩 켜 보는 시험 스케치다. `parts/
 - 보드는 "ESP32 Dev Module", 업로드 속도 921600(안 되면 115200), 시리얼 모니터 115200.
 - 포트: 터미널에서 `ls /dev/cu.*`. 보드를 꽂았을 때 `cu.usbserial-…` 또는 `cu.SLAB_USBtoUART` 가 새로 보이면 된다. 안 보이면 데이터용 마이크로 USB 케이블인지 확인하고, 보드 USB 칩(CP2102 또는 CH340)에 맞는 드라이버를 설치한다.
 - 업로드 중 "Connecting....." 에서 멈추면 보드의 BOOT 버튼을 누른 채로 기다린다.
-- 스케치 폴더 이름과 `.ino` 이름이 같아야 한다. 폴더째로 연다.
-- SSID·암호는 코드에 넣지 않는다. `parts/net` 은 시리얼 모니터에서 입력받는다. 입력한 값은 ESP32 안(NVS)에 저장될 수 있으니 보드를 남에게 넘길 때는 지운다.
+- 스케치 폴더 이름과 `.ino` 이름이 같아야 한다. 폴더째로 연다. `board/` 는 `board.ino`·`page.h`·`secrets.h` 가 같은 폴더에 있어야 한다.
+- 접속 정보는 코드에 넣지 않는다. `board/` 는 `secrets.h`(저장소에 올리지 않음)에서 읽고, `parts/net` 은 시리얼 모니터에서 입력받는다. 입력한 값은 ESP32 안(NVS)에 저장될 수 있으니 보드를 남에게 넘길 때는 지운다.
 
-견적에 없는 것: 저항(1 kΩ 3개, 2 kΩ 1개. 또는 10 kΩ 1개·20 kΩ 1개), 마이크로 USB 데이터 케이블, 멀티미터.
+견적에 없는 것: 마이크로 USB 데이터 케이블, 멀티미터, 자(mm 눈금).
 
-## 핀맵
-
-설계서(REV 15) 핀맵 그대로다. 모든 스케치가 이 핀을 쓴다.
+## 핀맵(REV16)
 
 | 부품 | ESP32 핀 | 전원 | 비고 |
 |---|---|---|---|
-| 보드 LED | GPIO2 | - | 호환보드에 LED 가 없으면 GPIO2-330 Ω-LED-GND |
-| 푸시 버튼 PBS-110 | GPIO25 | - | 다른 쪽은 GND. 내부 풀업, 누르면 LOW |
-| 플로트 스위치 HWD-WLC002 | GPIO27 | - | 다른 쪽은 GND. 내부 풀업 |
-| 릴레이 모듈 IN | GPIO26 | VCC 5V, GND | 12 V 는 COM·NO 접점에만 |
-| JSN-SR04T TRIG | GPIO5 | 5V, GND | 3.3 V 트리거로 동작 |
-| JSN-SR04T ECHO | GPIO18 | | 5 V 출력이라 ECHO-1 kΩ-GPIO18-2 kΩ-GND 로 분압(10k/20k 도 됨) |
-| HX711 DT | GPIO32 | 3V3, GND | 5 V 로 켜면 DT 가 5 V 가 되어 ESP32 에 못 넣는다. VDD 핀이 따로 있으면 VDD 3V3, VCC 5V |
-| HX711 SCK | GPIO33 | | |
-| (선택) KIT0139 수위 변환보드 출력 | GPIO34 | 보드 설명서대로 | 입력 전용 핀. 출력이 3.3 V 를 넘지 않는지 멀티미터로 먼저 확인 |
+| KIT0139 수위센서 변환보드 출력 | GPIO34 | 변환보드 VCC 3V3, 센서 12 V | 입력 전용 ADC1 핀. 출력이 3.3 V 를 넘지 않는지 멀티미터로 먼저 확인. 0 mm 에서 약 480 mV, 1 mV 가 약 2.6 mm |
+| 릴레이 모듈 IN | GPIO26 | VCC 5V, GND | 12 V 는 COM·NO 접점에만. 기본은 IN=LOW 에서 켜지는 모듈(`RELAY_ACTIVE_LOW`) |
+| 플로트 스위치 HWD-WLC002 | GPIO27 | - | 다른 쪽은 GND. 내부 풀업. 기본은 물이 모자랄 때 접점이 닫힘(`FLOAT_LOW_WHEN_CLOSED`) |
+| 보드 LED | GPIO2 | - | `parts/led` 만 쓴다 |
 
-공통 규칙: 5 V 와 3V3 은 DevKitC 핀에서 끌어 쓰고 GND 는 모두 한 줄에 모은다. 12 V 어댑터 선은 릴레이 접점과 펌프에만 간다. ESP32 핀에 5 V 이상이 닿는 배선은 하지 않는다.
+REV15 부품(푸시 버튼 GPIO25, JSN-SR04T GPIO5·18, HX711 GPIO32·33)은 REV16 구성에 없다. `parts/button`·`parts/sonar`·`parts/scale`·`node` 는 참고용으로 남겨 둔다.
+
+공통 규칙: 5 V 와 3V3 은 DevKitC 핀에서 끌어 쓰고 GND 는 모두 한 줄에 모은다. 12 V 어댑터 선은 릴레이 접점·펌프·수위센서에만 간다. ESP32 핀에 5 V 이상이 닿는 배선은 하지 않는다.
+
+## board 스케치
+
+100 ms 마다 수위를 읽고 펌프를 제어하며, 1초마다 최근 20초의 상승 속도로 A·B·C 구역의 침수 시각을 예측해 주의·경계·침수 알림을 낸다. 서버는 있어도 없어도 된다.
+
+접속 정보는 `board/secrets.h.example` 을 `board/secrets.h` 로 복사해 채운다. 비워 둔 항목은 그 기능이 꺼진다.
+
+| 항목 | 뜻 | 비우면 |
+|---|---|---|
+| `AP_PASS` | 보드가 여는 와이파이 `SMART_FLOOD` 의 암호. 8자 이상 | 관제 화면과 펌프 제어를 열지 않는다(암호 없는 AP 로 펌프를 제어하지 않기 위해) |
+| `STA_SSID`·`STA_PASS` | 서버가 있는 와이파이 | 와이파이에 붙지 않는다 |
+| `SERVER_URL` | `http://<노트북 IP>:8000`. 끝에 `/` 없이 | 서버로 보내지 않는다 |
+| `NTFY_TOPIC` | 휴대폰 푸시용 ntfy 주제 | 푸시를 보내지 않는다 |
+
+관제 화면은 휴대폰을 `SMART_FLOOD` 에 붙이고 시리얼에 찍힌 주소(보통 `http://192.168.4.1`)를 열면 나온다. 화면이 쓰는 경로는 다음과 같다.
+
+| 경로 | 뜻 |
+|---|---|
+| `/api/cmd?c=start` | 강우 회차 시작(기록과 단계를 비움). `stop` 정지, `rain` 강우 재개, `manual` 수동 펌프, `flowtest` 30초 유량 측정 |
+| `/api/cmd?c=flowset&v=<mL>` | 30초 동안 받은 물 양(mL)으로 유량 저장. `areaapply` 는 추정 수면 면적 적용 |
+| `/api/cmd?c=cal1&v=<mm>`, `cal2&v=<mm>` | 자로 잰 수위 두 점으로 보정. `calreset` 은 이론값으로 되돌림 |
+| `/api/set?z0=&z1=&z2=&maxLevel=&cautionEta=&warningEta=&rainOnS=&rainOffS=` | 설정 저장(플래시에 남음) |
+| `/api/status`, `/api/hist`, `/log.csv` | 상태 JSON, 최근 수위, 회차 기록 |
+
+기본 설정: 구역 침수 기준 A 40·B 70·C 110 mm(어항 바닥 0), 안전 최대 수위 100 mm(C 는 설계상 침수하지 않음), 주의 60초·경계 30초, 강우 흉내 ON 2초·OFF 8초, 연속 가동 최대 60초, 회차 최대 1800초.
+
+펌프가 멈추는 조건: 플로트가 "물 모자람"이면 100 ms 안에, 수위센서 이상이면 강우 모드에서, 안전 최대 수위에 닿으면, 연속 가동이 60초를 넘으면, 회차가 1800초를 넘으면. 수동·유량 측정 모드는 센서 이상을 보지 않고 가동 제한으로만 멈춘다.
+
+서버에는 1초마다 `POST /api/ingest` 로 `distA_mm = 600 - 수위` 를 보낸다. 600 은 `INSTALL_HEIGHT_MM` 이고 `backend/config.yaml` 의 `sensors.A.install_height_mm` 와 같아야 한다. B 구역과 무게는 `null`·`absent`, 센서 이상이면 `distA_mm` 가 `null` 이고 `A` 가 `fault` 다. 서버가 꺼져 있어도 연결·읽기 제한이 각 400 ms 라 펌프 제어 루프가 오래 막히지 않는다. ntfy 는 TLS 인증서를 확인하지 않고(`setInsecure`) 보낸다.
+
+알려진 특성: 강우 흉내가 ON·OFF 펄스라 20초 회귀 기울기가 출렁이고, 그래서 ETA 가 흔들리며 첫 알림이 명목 60초보다 이르게 올 수 있다. 수위가 최대 수위 근처일 때 C 구역에도 "주의"가 잠깐 뜰 수 있다(C 는 침수하지 않는다). 설계서 10장의 화면 스크립트에서 PDF 에 잘린 줄과 `cfg.z2` 오류는 `page.h` 머리에 적은 대로 고쳤다.
+
+### 확인한 것
+
+맥에서 WiFi·HTTPClient·WebServer·Preferences·ADC 의 대역을 만들어 `board.ino` 를 C++ 로 컴파일하고, `setup()`·`loop()` 를 가짜 시계(100 ms)와 가짜 수위로 돌렸다. 통과한 것: 부팅 직후 릴레이 꺼짐(고임피던스), `secrets.h` 가 없으면 와이파이·관제 화면·전송 없음, 1초마다 전송과 `seq` 증가, 전송 본문 1101건이 서버의 `Message` 스키마와 live 모드 `/api/ingest` 를 통과, 강우 회차에서 A·B 순서 침수와 경보 선행 약 100초, 최대 수위 정지, 플로트 100 ms 정지, 센서 이상 정지와 `null` 전송, 수동 60초 정지, 설정 저장·재로드, 두 점 보정. 대역은 직접 만든 것이라 ESP32 코어 API 의 이름과 시그니처는 확인되지 않았다. 보드에서 처음 컴파일할 때 오류가 날 수 있다.
 
 ## 순서
 
@@ -41,25 +71,14 @@ ESP32 DevKitC V4 와 부품을 하나씩 켜 보는 시험 스케치다. `parts/
 |---|---|---|---|---|
 | 1 | ESP32 단독 | `parts/led` | USB 만 | 업로드 성공. 시리얼에 칩 이름과 0.5초마다 tick 이 찍힌다. LED 가 깜빡인다 |
 | 2 | ESP32 WiFi | `parts/net` | USB 만 | 시리얼 모니터에 SSID·암호·서버 URL 을 한 줄씩 입력(줄 끝 "New Line"). IP 가 찍히고 `GET … -> 200` 과 `/api/state` 앞부분이 보인다 |
-| 3 | 푸시 버튼 | `parts/button` | GPIO25-버튼-GND | 누르면 "눌림(LOW)", 떼면 "뗌(HIGH)" 가 한 번씩만 찍힌다 |
-| 4 | 플로트 스위치 | `parts/reed` | GPIO27-스위치-GND | 플로트를 위아래로 돌리면 닫힘·열림이 바뀐다. 어느 방향이 "물 있음"인지 적는다 |
-| 5 | 릴레이(무부하) | `parts/relay` | IN GPIO26, VCC 5V, GND | 3초마다 딸깍 소리와 LED. IN 이 LOW 일 때 켜지면 active-LOW 모듈이다. 어느 쪽인지 적는다 |
-| 6 | 릴레이 + 펌프 | `parts/relay` | 어댑터 + 를 COM, NO 를 펌프 +, 펌프 - 를 어댑터 - | 펌프를 물에 넣은 뒤에만 어댑터를 꽂는다(수중펌프는 공회전 금지). 3초 켜짐·꺼짐이 반복된다. 1분간 받은 물 양으로 L/min 을 적는다 |
-| 7 | 초음파 JSN-SR04T | `parts/sonar` | TRIG GPIO5, ECHO 분압 뒤 GPIO18, 5V, GND | 자로 300·400·500 mm 를 두고 ±10 mm 안에 든다. 150 mm 이하에서 어떻게 되는지(0, 튐, 엉뚱한 값) 적는다. 물 표면에도 같이 해 본다 |
-| 8 | HX711 + 로드셀 | `parts/scale` | DT GPIO32, SCK GPIO33, 3V3, GND. 로드셀은 아래 "로드셀" | 빈 상태에서 `t`, 500 g(물 500 mL)을 올리고 `c500`. 그 뒤 다른 무게가 ±2 % 안에 든다. 5분 두고 흔들림(g)을 적는다 |
-| 9 | (선택) KIT0139 | `parts/depth` | 변환보드 출력을 GPIO34 에 | 물 깊이를 바꾸면 mV 가 따라 움직인다. 깊이 두 점에서 mV 를 적는다 |
-| 10 | 통합 | `node` | 전부 | 1초마다 JSON 한 줄. 펌프가 돌 때 거리와 무게 값이 튀지 않는다. 버튼으로 펌프가 켜지고 플로트가 "물 없음"이면 꺼진다 |
+| 3 | 플로트 스위치 | `parts/reed` | GPIO27-스위치-GND | 플로트를 위아래로 돌리면 닫힘·열림이 바뀐다. 어느 방향이 "물 모자람"인지 적는다 |
+| 4 | 릴레이(무부하) | `parts/relay` | IN GPIO26, VCC 5V, GND | 3초마다 딸깍 소리와 LED. IN 이 LOW 일 때 켜지면 active-LOW 모듈이다. 어느 쪽인지 적는다 |
+| 5 | 릴레이 + 펌프 | `parts/relay` | 어댑터 + 를 COM, NO 를 펌프 +, 펌프 - 를 어댑터 - | 펌프를 물에 넣은 뒤에만 어댑터를 꽂는다(수중펌프는 공회전 금지). 3초 켜짐·꺼짐이 반복된다. 1분간 받은 물 양으로 L/min 을 적는다 |
+| 6 | KIT0139 | `parts/depth` | 변환보드 출력을 GPIO34 에 | 물이 없을 때 mV 와 1분 동안의 흔들림(mV)을 적는다. 1 mV 가 약 2.6 mm 라 ±3 mV 면 수위 ±8 mm 다. 깊이 두 점에서 mV 를 적는다 |
+| 7 | board(서버 없이) | `board` | 전부. `secrets.h` 에 `AP_PASS` 만 | 관제 화면에 수위가 보인다. `cal1`·`cal2` 보정 뒤 자 눈금과 ±5 mm 안에 든다. `start` 로 강우 회차를 돌리면 물이 A 기준(40 mm)에 닿기 전에 주의·경계가 뜨고, 플로트를 들면 바로 멈춘다 |
+| 8 | board + 서버 | `board` | 전부. `STA_SSID`·`STA_PASS`·`SERVER_URL` 채움 | 서버를 live 로 바꾸고 회차를 시작하면 `/api/state` 의 `devices.esp32_1` 이 online 이고 A 수위가 보드 값과 같다 |
 
-`node/node.ino` 위쪽의 `RLY_ON`, `WET`, `ZERO`, `PER_GRAM` 은 시험 4·5·8 의 결과로 바꾼 뒤 올린다.
-
-## 로드셀
-
-견적의 `114990100` 은 선이 3개인 반브리지(half-bridge) 로드셀일 가능성이 크다. 선을 세어 본다.
-
-- 4선(빨·검·흰·녹): 빨강 E+, 검정 E-, 흰색 A-, 녹색 A+ 에 바로 연결한다.
-- 3선: 멀티미터로 가운데 선을 찾는다. 가운데 선과 양 끝선 사이가 각각 약 1 kΩ, 양 끝선 사이가 약 2 kΩ 이다. 양 끝선을 E+·E-, 가운데 선을 A+ 에 연결하고, A- 는 1 kΩ 두 개를 E+·E- 사이에 직렬로 두어 그 중점에 연결한다. 이 저항 두 개가 나머지 반쪽 브리지다.
-
-50 kg 셀로 0.3 L 급수통(약 300 g 변화)을 재면 분해능이 수 g 이고 잡음이 크다. 시험 8 의 5분 흔들림이 수 g 을 넘으면 1 kg 또는 5 kg 바형(4선) 셀로 바꾸는 쪽이 맞다.
+시험 3·4 의 결과가 기본값과 다르면 `board.ino` 위쪽의 `FLOAT_LOW_WHEN_CLOSED`·`RELAY_ACTIVE_LOW` 를 바꾼 뒤 올린다.
 
 ## 서버에 닿게 하기
 
@@ -70,16 +89,22 @@ cd backend
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
+서버는 기본이 시뮬레이션이다. 보드 값을 쓰려면 멈춘 상태에서 live 로 바꾸고 회차를 시작한다.
+
+```bash
+curl -X POST http://localhost:8000/api/source -H 'Content-Type: application/json' -d '{"mode":"live"}'
+curl -X POST http://localhost:8000/api/experiment/start -H 'Content-Type: application/json' -d '{}'
+```
+
 macOS 방화벽이 켜져 있으면 python 의 수신 연결을 허용한다. ESP32 와 노트북이 같은 WiFi 에 있어야 한다.
 
 ## 적어 둘 값
 
-시험 결과는 M4 에서 `backend/config.yaml` 에 들어간다.
-
 | 값 | 어디서 | 들어갈 곳 |
 |---|---|---|
-| 초음파 최소 거리(mm) | 시험 7 | `sensors.<id>.min_range_mm` |
-| 센서 설치 높이(바닥에서 센서 면까지, mm) | 모형에 단 뒤 | `sensors.<id>.install_height_mm`, `max_range_mm` |
-| 펌프 유량(L/min) | 시험 6 | 강우 프리셋 대비 릴레이 듀티 계산 |
-| 로드셀 영점·보정값(원시값/g)과 5분 흔들림 | 시험 8 | 유입량 계산, 로드셀 교체 판단 |
-| 릴레이 켜지는 레벨, 플로트 "물 있음" 레벨 | 시험 4·5 | `node/node.ino` 의 `RLY_ON`, `WET` |
+| 센서 설치 높이(바닥에서 센서 기준면까지, mm) | 모형에 단 뒤 | `board.ino` 의 `INSTALL_HEIGHT_MM`, `backend/config.yaml` 의 `sensors.A.install_height_mm`·`max_range_mm` |
+| 0 mm 에서의 mV 와 1분 흔들림(mV) | 시험 6 | `cal1`·`cal2` 보정, 잡음이 커서 평균 시간을 늘릴지 판단 |
+| 펌프 유량(L/min 또는 30초 mL) | 시험 5, `flowtest` | `flowset`, 강우 세기 환산 |
+| 릴레이 켜지는 레벨, 플로트 "물 모자람" 방향 | 시험 3·4 | `RELAY_ACTIVE_LOW`, `FLOAT_LOW_WHEN_CLOSED` |
+| 수면 면적(cm²) | 자로 재서 | 설정 `areaCm2`(기본 1700) 또는 `areaapply` |
+| 구역 기준 높이(mm) | 모형에서 자로 | `/api/set` 의 `z0`·`z1`·`z2`, `backend/config.yaml` 의 임계값 |
