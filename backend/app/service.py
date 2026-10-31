@@ -559,7 +559,13 @@ class Experiment:
         self._ticks += 1
         if self._replay is None:  # 재생 중에는 알리지 않음(알림 포트의 약속)
             for notice in notices:
-                self.notifier.notice(notice)
+                try:
+                    self.notifier.notice(notice)
+                except Exception as error:  # 알림이 실패해도 회차는 이어 감
+                    name = type(error).__name__  # 예외 종류만(글에 키·번호가 섞일 수 있음)
+                    log.error(
+                        "%s 알림을 보내지 못했지만 회차는 이어 간다: %s", self._experiment_id, name
+                    )
 
     # 관측 메시지를 A·B 수위(m), 배수량(m³), 센서별 품질, absent 구역으로 변환. 무효는 None
     def reading(

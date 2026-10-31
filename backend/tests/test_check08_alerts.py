@@ -1,5 +1,6 @@
 import copy
 import json
+import logging
 import math
 import pytest
 from datetime import timedelta
@@ -18,6 +19,7 @@ B_BLOCKED = {"blockage": {"type": "full", "location": "INLET-03"}}  # B 의 빗�
 EVACUATE = [{"zone": "B", "stage": "evacuate", "etaSec": 0}]  # 침수 경보 하나
 A_ONLY = {"A": "ok", "B": "absent", "load": "absent"}  # REV16 처럼 A 센서만 있음
 KICKS = {"dry-45": (0.0, 45.0), "dry-60": (0.0, 60.0), "storm-80": (150.0, 80.0)}  # (강우, A mm)
+DETAIL = "알림 서비스 내부 정보"  # 알림 예외의 글. 키·번호가 섞일 수 있어 서버 로그에 남으면 안 됨
 
 
 # 가상 시계 시작 시각에서 seconds 초 뒤의 기록 시각 글자
@@ -30,6 +32,18 @@ def answer(client, path: str, body: dict | None = None) -> dict:
     response = client.post(path, json=body or {})
     assert response.status_code == 200, response.text
     return response.json()
+
+
+# 알림 Notifier 의 가짜. 받을 때마다 예외를 내고 받은 수를 셈
+class Dud:
+    # 만들 때 받은 수 0
+    def __init__(self) -> None:
+        self.calls = 0
+
+    # 받은 수를 세고 예외를 냄
+    def notice(self, event: dict) -> None:
+        self.calls += 1
+        raise RuntimeError(DETAIL)
 
 
 @pytest.fixture
@@ -209,3 +223,32 @@ def test_a_correction_raises_no_false_alert_in_b(builder, clock, config, journal
     states = chronicle(journal, ID)
     assert len(states) == 30
     assert [s["elapsedSec"] for s in states if any(a["zone"] == "B" for a in s["alerts"])] == []
+
+
+# 알림이 예외를 내도 회차가 이어지고, 서버 로그에는 예외 종류만 남는지 검사
+def test_a_failing_notifier_keeps_the_run_going(builder, clock, cfg, journal, timing, caplog):
+    dud = Dud()
+    client = builder(cfg, source=Script(None), notifier=dud)
+    answer(client, START_URL, B_BLOCKED)
+    answer(client, RAIN_URL, {"mmPerHour": RAIN_MM_PER_H})
+    lapse(clock, client.app.state.service, timing["warning"] + 1)
+    assert client.get("/api/state").json()["runState"] == "running"
+    assert len(chronicle(journal, ID)) == timing["warning"] + 1
+    events = [r for r in journal.records(ID) if r["type"] == "event"]
+    assert [e["kind"] for e in events] == ["stage", "stage"]
+    assert dud.calls == 2
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors == [f"{ID} 알림을 보내지 못했지만 회차는 이어 간다: RuntimeError"] * 2
+    assert DETAIL not in caplog.text
+
+
+# 기본 알림(Stub)이 단계 전환마다 사건 글을 WARNING 으로 남기는지 검사. uvicorn 기본 설정에서도 보임
+def test_the_stub_warns_each_stage_change(builder, clock, cfg, journal, timing, caplog):
+    client = builder(cfg, source=Script(None))
+    answer(client, START_URL, B_BLOCKED)
+    answer(client, RAIN_URL, {"mmPerHour": RAIN_MM_PER_H})
+    lapse(clock, client.app.state.service, timing["evacuate"])
+    messages = [r["message"] for r in journal.records(ID) if r["type"] == "event"]
+    assert len(messages) == 3
+    notes = [(r.levelno, r.getMessage()) for r in caplog.records if r.name == "app.adapters.stub"]
+    assert notes == [(logging.WARNING, f"알림(기록만): {m}") for m in messages]
