@@ -41,11 +41,11 @@ def bridge(flows, a, b):
 
 
 
-# 3.2 강우 유입: 60 mm/h 는 0.48 L/min 이고 면적 비율로 나뉘는지 검사
-def test_rain_60mm_per_h_is_0_48_l_per_min_split_by_share(params):
+# 3.2 강우 유입: 60 mm/h 는 0.17 L/min(바닥 0.17 m², REV16)이고 면적 비율로 나뉘는지 검사
+def test_rain_60mm_per_h_is_0_17_l_per_min_split_by_share(params):
     flows = flux(baseline(params), Conditions(rain_mm_per_h=60.0), params)
     total = sum(flows.rain_m3s.values())
-    assert total * 1000 * 60 == pytest.approx(0.48)  # 합계가 0.48 L/min 이어야 함
+    assert total * 1000 * 60 == pytest.approx(0.17)  # 합계가 0.17 L/min 이어야 함
     shares = {"A": 0.40, "B": 0.35, "C": 0.25}
     assert flows.rain_m3s == pytest.approx({z: total * s for z, s in shares.items()})
 
@@ -147,7 +147,7 @@ def test_level_rates_are_net_inflow_over_storage_area(params):
     # A 2 mm, B 10 mm, C 10 mm. B→A, C→B 로 월류가 생김
     state = point(params, A=0.002, B=0.010, C=0.010)
     cond = Conditions(rain_mm_per_h=90.0, blockage={"INLET-02": "partial"})
-    rain = 90.0 / 3.6e6 * 0.48  # 전체 강우 유입(m³/s) = 비 세기 × 집수 면적 0.48 m²
+    rain = 90.0 / 3.6e6 * 0.17  # 전체 강우 유입(m³/s) = 비 세기 × 집수 면적 0.17 m²
     q_ba = 0.55 * 0.005**1.5  # B→A 월류량. A 수면 0.002 는 경계 아래라 s = 1
     q_cb = 0.55 * 0.005**1.5  # C→B 월류량. B 수면 0.030 도 C–B 경계 0.065 아래
     orifice = 0.6 * 0.00030  # 오리피스 계수 × 면적
@@ -156,11 +156,11 @@ def test_level_rates_are_net_inflow_over_storage_area(params):
     rates = gradient(state, cond, params)  # 구역별 수위 변화율(m/s)을 구
     assert rates == pytest.approx(
         {
-            # A: 비 + B→A 월류 − 배수, 나누기 저류 면적 0.10
-            "A": (rain * 0.40 + q_ba - drain_a) / 0.10,
-            # B: 비 + C→B 월류 − B→A 월류 − 배수, 면적 0.10
-            "B": (rain * 0.35 + q_cb - q_ba - drain_b) / 0.10,
-            "C": (rain * 0.25 - q_cb) / 0.08,  # C: 비 − C→B 월류, 면적 0.08
+            # A: 비 + B→A 월류 − 배수, 나누기 저류 면적 0.035
+            "A": (rain * 0.40 + q_ba - drain_a) / 0.035,
+            # B: 비 + C→B 월류 − B→A 월류 − 배수, 면적 0.035
+            "B": (rain * 0.35 + q_cb - q_ba - drain_b) / 0.035,
+            "C": (rain * 0.25 - q_cb) / 0.028,  # C: 비 − C→B 월류, 면적 0.028
         }
     )
 
@@ -274,13 +274,13 @@ def test_weight_to_drained_volume(config):
 def test_correction_moves_model_toward_observation(params):
     state = point(params, A=0.020, B=0.010, C=0.005)
     corrected, records = adjustment(state, {"A": 0.030}, 0.3, params)
-    # A 부피: 0.002 + 0.3 × (0.003 − 0.002) = 0.0023 m³
-    assert corrected.V["A"] == pytest.approx(0.0023)
+    # A 부피(면적 0.035): 0.0007 + 0.3 × (0.00105 − 0.0007) = 0.000805 m³
+    assert corrected.V["A"] == pytest.approx(0.000805)
     assert (corrected.V["B"], corrected.V["C"]) == (state.V["B"], state.V["C"])
     (record,) = records
     assert (record.zone, record.before_m3, record.after_m3) == ("A", state.V["A"], corrected.V["A"])
-    assert record.delta_m3 == pytest.approx(0.0003)
-    assert corrected.correction_m3 == pytest.approx(0.0003)
+    assert record.delta_m3 == pytest.approx(0.000105)
+    assert corrected.correction_m3 == pytest.approx(0.000105)
 
 
 # C 구역은 보정하지 않는지 검사

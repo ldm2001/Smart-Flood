@@ -59,6 +59,7 @@ class Zone(Response):
     levelMm: Level  # 수위(mm)
     rateMmSec: number(ge=-RATE_LIMIT_MM_S, le=RATE_LIMIT_MM_S)  # 수위 변화율(mm/s) -20~20
     source: Literal["measured", "simulated", "estimated", "replay"]  # 실측·가상 실측·모델 추정·재생
+    thresholdMm: number(gt=0) | None = None  # 한계 수위(mm). 이 서버가 더한 필드
 
 
 # A·B·C 세 구역
@@ -115,7 +116,7 @@ class Devices(Response):
 # 경보 하나
 class Alert(Response):
     zone: Literal["A", "B", "C"]  # 경보 구역
-    stage: Literal["caution", "warning", "evacuate"]  # 경보 단계: 주의·경고·대피
+    stage: Literal["caution", "warning", "evacuate"]  # 경보 단계: 주의·경계·침수
     etaSec: NonNegative | None = None  # 임계 도달까지 남은 시간(초), 모르면 null
 
 
@@ -170,6 +171,7 @@ class Board(Response):
                         "levelMm": s.levels_m[z] * M_TO_MM,  # 수위 m → mm
                         "rateMmSec": rate(s.rates_m_per_s[z]),  # 변화율 mm/s, ±20 포화
                         "source": s.zone_sources[z],
+                        "thresholdMm": s.thresholds_m[z] * M_TO_MM,  # 한계 수위 m → mm
                     }
                     for z in ZONES
                 },
@@ -394,12 +396,13 @@ def frame(
     }
 
 
-# 사건 기록 한 줄을 만듦
-def event(kind: str, elapsed_s: float, time: datetime, message: str) -> dict:
+# 사건 기록 한 줄을 만듦. details 는 종류별 덧붙임(stage: zone·stage·previous·etaSec)
+def event(kind: str, elapsed_s: float, time: datetime, message: str, **details) -> dict:
     return {
         "type": "event",  # 줄 종류: 사건
         "kind": kind,
         "elapsedSec": elapsed_s,
         "time": moment(time),
         "message": message,
+        **details,
     }

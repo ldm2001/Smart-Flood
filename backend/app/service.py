@@ -4,6 +4,7 @@ import logging
 import math
 from app.adapters.live import Live
 from app.adapters.replay_source import Command, Replay
+from app.adapters.stub import Stub
 from app.config import checksum
 from app.core.calibration import (
     OBSERVED_ZONES,
@@ -13,6 +14,7 @@ from app.core.calibration import (
     drainage,
     waterline,
 )
+from app.core.danger import Rule, Watch, bulletin, patrol, shifts
 from app.core.model import (
     BLOCKAGE_TYPES,
     ZONES,
@@ -55,6 +57,7 @@ STANDBY_ID = "EXP-STANDBY"  # 회차를 시작하기 전 대기 상태의 ID
 DEFAULT_RAIN = "medium"
 RAIN_PRESET_LABELS = {"light": "약한 강우", "medium": "보통 강우", "heavy": "강한 강우"}
 BLOCKAGE_LABELS = {"partial": "부분 막힘", "full": "완전 막힘"}
+STAGE_LABELS = {"safe": "정상", "caution": "주의", "warning": "경계", "evacuate": "침수"}
 OBSERVED_SOURCE = {"sim": "simulated", "replay": "replay", "live": "measured"}
 SIM_DEVICES = {
     "esp32_1": "online",  # ESP32 1번: 연결됨
@@ -105,6 +108,7 @@ class Snapshot:
     blockage_label: str  # 막힘 이름
     devices: dict[str, str]  # 장치 상태
     quality: str  # 데이터 품질
+    thresholds_m: dict[str, float]  # 구역별 한계 수위(m)
     alerts: tuple = ()  # 경보 목록
 
 
@@ -125,9 +129,10 @@ class Experiment:
         self.experiment_log = experiment_log
         self._default_source = source
         self._live = Live() if live is None else live  # /api/ingest 가 채우는 입력원
-        self.notifier = notifier  # 위험 단계 알림(M5 전에는 부르는 곳이 없음)
+        self.notifier = Stub() if notifier is None else notifier  # 없으면 기록만 하는 Stub
         self._config = config
         self._params = Params.config(config)
+        self._rule = Rule.config(config)  # 경보 규칙(쓸 수 없는 값이면 기동에서 실패)
         self._presets = {k: float(v) for k, v in config["rain_presets_mm_per_h"].items()}
         self._rain_max = float(config["rain_max_mm_per_h"])  # 강우 상한(mm/h)
         self._period_s = 1.0 / float(config["tick_hz"])  # tick 주기(초)
@@ -251,6 +256,7 @@ class Experiment:
         self._state = baseline(self._params)
         self._latest: dict[str, tuple[float, float]] = {}  # 구역 → (관측 수위 m, 받은 경과 초)
         self._absent = frozenset()
+        self._watch = {}
         self.source.origin()
         self._run_state = "running"
 
@@ -264,6 +270,7 @@ class Experiment:
         self._state = baseline(self._params)
         self._latest = {}
         self._absent = frozenset()
+        self._watch: dict[str, Watch] = {}  # 구역별 경보 감시 상태
 
     # 그 날짜의 기록 중 가장 큰 번호 + 1. 재시작해도 번호가 겹치지 않음
     def serial(self, now: datetime) -> str:
@@ -427,6 +434,7 @@ class Experiment:
         self._ticks = 0
         self._state = baseline(self._params)
         self._latest = {}
+        self._watch = {}
         self._run_state = "running"
         self.progress()  # 0 초의 조작을 먼저 적용
 
@@ -532,16 +540,26 @@ class Experiment:
         corrections = ()  # 보정 내역(없으면 비어 있음)
         if readings:
             state, corrections = adjustment(state, readings, self._gain, self._params)
+        depths = {z: depth(z, state.V[z], self._params) for z in ZONES}  # 보정된 모델 수위(m)
+        rates = gradient(state, cond, self._params)
+        watch = patrol(self._watch, depths, rates, elapsed, self._rule)  # 구역별 경보 감시
         latest = {**self._latest, **{z: (h, elapsed) for z, h in readings.items()}}
-        snapshot = self.capture(state, elapsed, latest, absent)
+        snapshot = self.capture(state, elapsed, latest, absent, watch)
         record = frame(snapshot, state, corrections)
+        notices = [  # 단계가 바뀐 구역의 stage 사건 줄
+            self.advisory(z, previous, stage, eta, elapsed, snapshot.timestamp)
+            for z, previous, stage, eta in shifts(self._watch, watch)
+        ]
         if self._replay is None:  # 재생이 아닐 때만 씀(재생도 줄은 만들어 계약을 검사)
             with shield():  # 입출력 오류는 503 으로
-                lines = [*observations, record]  # obs 줄들과 state 줄을 한 tick 에 함께
+                lines = [*observations, record, *notices]  # obs·state·event 줄을 한 tick 에 함께
                 self.experiment_log.batch(self._experiment_id, lines)  # 다 쓰이거나 하나도 안 쓰임
         self._state, self._latest, self._absent = state, latest, absent
-        self._snapshot = snapshot
+        self._watch, self._snapshot = watch, snapshot
         self._ticks += 1
+        if self._replay is None:  # 재생 중에는 알리지 않음(알림 포트의 약속)
+            for notice in notices:
+                self.notifier.notice(notice)
 
     # 관측 메시지를 A·B 수위(m), 배수량(m³), 센서별 품질, absent 구역으로 변환. 무효는 None
     def reading(
@@ -577,8 +595,10 @@ class Experiment:
         elapsed_s: float,
         latest: dict[str, tuple[float, float]],
         absent: frozenset[str] | None = None,  # absent 구역(없으면 마지막 메시지의 것)
+        watch: dict[str, Watch] | None = None,  # 경보 감시 상태(없으면 지금 것)
     ) -> Snapshot:
         absent = self._absent if absent is None else absent
+        watch = self._watch if watch is None else watch
         cond = self.conditions
         prediction = forecast(
             state,
@@ -617,6 +637,33 @@ class Experiment:
             blockage_label=self.outlet(),
             devices=self.roster(),
             quality=self.grade(elapsed_s, latest, absent),
+            thresholds_m=self._rule.thresholds_m,
+            alerts=bulletin(watch),
+        )
+
+    # 단계 전환 사건 한 줄. 도달 초는 반올림, 한계에 닿으면 "한계 도달", 안 오르면 생략
+    def advisory(
+        self,
+        zone: str,
+        previous: str,
+        stage: str,
+        eta_s: float | None,
+        elapsed_s: float,
+        time: datetime,
+    ) -> dict:
+        tail = ""  # 도달 예상 설명
+        if eta_s is not None:
+            tail = ", 한계 도달" if eta_s == 0 else f", 한계까지 {round(eta_s)} 초"
+        message = f"{zone} 구역 {STAGE_LABELS[stage]} (이전 {STAGE_LABELS[previous]}{tail})"
+        return event(
+            "stage",
+            elapsed_s,
+            time,
+            message,
+            zone=zone,
+            stage=stage,
+            previous=previous,
+            etaSec=eta_s,
         )
 
     # 장치 메시지를 받아 둠(입력원이 live 일 때 다음 tick 에 쓰임). 모르는 장치는 422

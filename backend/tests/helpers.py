@@ -60,6 +60,17 @@ class Script:
         ]
 
 
+# 알림 Notifier 의 가짜. 받은 사건을 모아 두기만 함
+class Mailbox:
+    # 만들 때 빈 목록
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    # 사건 하나를 받아 둠
+    def notice(self, event: dict) -> None:
+        self.events.append(event)
+
+
 # 기록 파일에서 state 레코드의 상태만 순서대로 모으는 함수
 def chronicle(experiment_log, experiment_id: str) -> list[dict]:
     return [r["state"] for r in experiment_log.records(experiment_id) if r["type"] == "state"]

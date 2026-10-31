@@ -16,9 +16,9 @@ SPEC_EXAMPLE = {  # 지시서 4.1 의 응답 예시
     "timestamp": "2026-10-22T10:00:00+09:00",
     "elapsedSec": 42,
     "zones": {
-        "A": {"levelMm": 31.2, "rateMmSec": 0.24, "source": "simulated"},  # A 구역: 가상 실측
-        "B": {"levelMm": 22.7, "rateMmSec": 0.16, "source": "simulated"},  # B 구역: 가상 실측
-        "C": {"levelMm": 15.4, "rateMmSec": 0.10, "source": "estimated"},  # C 구역: 모델 추정
+        "A": {"levelMm": 31.2, "rateMmSec": 0.24, "source": "simulated", "thresholdMm": 40},
+        "B": {"levelMm": 22.7, "rateMmSec": 0.16, "source": "simulated", "thresholdMm": 70},
+        "C": {"levelMm": 15.4, "rateMmSec": 0.10, "source": "estimated", "thresholdMm": 110},
     },
     "predictions": {  # 구역별 10·20·30초 뒤 예측 수위(mm)
         "A": {"10": 33.6, "20": 36.0, "30": 38.4},
@@ -284,12 +284,14 @@ def test_api_output_keeps_every_example_field(dossier):
 
 
 # 더한 필드가 항상 있는지 검사
-def test_api_output_always_carries_the_added_fields(dossier):
+def test_api_output_always_carries_the_added_fields(dossier, config):
     for body in dossier:
         assert body["runState"] in ("idle", "running", "stopped")
         meta = body["predictionMeta"]
         assert meta["basisTime"] == body["timestamp"]
         assert meta["basisElapsedSec"] == body["elapsedSec"]
+        for z in ("A", "B", "C"):
+            assert body["zones"][z]["thresholdMm"] == config["zones"][z]["threshold_mm"]
 
 
 # 범위 밖 값은 잘라 내지 않고 응답 검증에서 실패하는지 검사(500 으로 드러남)
