@@ -3,7 +3,7 @@ import json
 import math
 import pytest
 from datetime import timedelta
-from tests.helpers import START, Mailbox, Script, chronicle, footage, lapse
+from tests.helpers import START, Mailbox, Script, chronicle, footage, lapse, readout
 
 ID = "EXP-20261022-001"
 START_URL = "/api/experiment/start"
@@ -16,6 +16,8 @@ RAIN_MM_PER_H = 150.0  # 상한의 비
 THRESHOLD_MM = 6.0  # 시험용 B 한계 수위(mm). 기본 70 mm 는 ASSUMED 개구로는 닿지 않음
 B_BLOCKED = {"blockage": {"type": "full", "location": "INLET-03"}}  # B 의 빗물받이를 완전히 막음
 EVACUATE = [{"zone": "B", "stage": "evacuate", "etaSec": 0}]  # 침수 경보 하나
+A_ONLY = {"A": "ok", "B": "absent", "load": "absent"}  # REV16 처럼 A 센서만 있음
+KICKS = {"dry-45": (0.0, 45.0), "dry-60": (0.0, 60.0), "storm-80": (150.0, 80.0)}  # (강우, A mm)
 
 
 # 가상 시계 시작 시각에서 seconds 초 뒤의 기록 시각 글자
@@ -194,3 +196,16 @@ def test_reset_and_a_new_start_clear_the_alerts(builder, clock, cfg, timing):
     answer(client, START_URL, B_BLOCKED)
     lapse(clock, service, 1)
     assert client.get("/api/state").json()["alerts"] == []
+
+
+@pytest.mark.parametrize("rain, a_mm", KICKS.values(), ids=KICKS.keys())
+# A 센서만 있을 때 보정이 끌어올린 A 의 순간 흐름으로 B 에 거짓 경보가 나지 않는지 검사
+def test_a_correction_raises_no_false_alert_in_b(builder, clock, config, journal, rain, a_mm):
+    readings = {**readout(config, a_mm=a_mm, b_mm=0.0), "distB_mm": None, "weight_g": None}
+    client = builder(source=Script(readings, A_ONLY))
+    answer(client, START_URL)
+    answer(client, RAIN_URL, {"mmPerHour": rain})
+    lapse(clock, client.app.state.service, 30)
+    states = chronicle(journal, ID)
+    assert len(states) == 30
+    assert [s["elapsedSec"] for s in states if any(a["zone"] == "B" for a in s["alerts"])] == []

@@ -537,11 +537,11 @@ class Experiment:
             )
             readings.update({z: h for z, h in levels.items() if h is not None})
         state = evolution(self._state, cond, self._params, self._period_s)
+        rates = gradient(state, cond, self._params)  # 보정 전 변화율(보정이 낸 순간 흐름 제외)
         corrections = ()  # 보정 내역(없으면 비어 있음)
         if readings:
             state, corrections = adjustment(state, readings, self._gain, self._params)
         depths = {z: depth(z, state.V[z], self._params) for z in ZONES}  # 보정된 모델 수위(m)
-        rates = gradient(state, cond, self._params)
         watch = patrol(self._watch, depths, rates, elapsed, self._rule)  # 구역별 경보 감시
         latest = {**self._latest, **{z: (h, elapsed) for z, h in readings.items()}}
         snapshot = self.capture(state, elapsed, latest, absent, watch)
