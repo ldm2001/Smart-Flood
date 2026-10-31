@@ -129,12 +129,12 @@ def test_stages_follow_the_eta_on_the_model_depth(voyage, journal, timing):
     assert stages == expected
 
 
-# 주의·경계의 etaSec 가 지금 변화율로 한계까지 남은 초이고 침수는 0 인지 검사
+# 주의·경계의 etaSec 가 지금 변화율로 한계까지 남은 초를 올림한 정수이고 침수는 0 인지 검사
 def test_eta_is_the_seconds_left_to_the_threshold(voyage, journal, timing):
     states = chronicle(journal, ID)
     for n in range(timing["caution"], timing["evacuate"]):
         (alert,) = states[n - 1]["alerts"]
-        assert alert["etaSec"] == pytest.approx(timing["steps"] - n, abs=1e-6)
+        assert alert["etaSec"] == math.ceil(timing["steps"] - n)
     assert states[timing["evacuate"] - 1]["alerts"] == EVACUATE
 
 
@@ -162,8 +162,7 @@ def test_each_stage_change_leaves_a_stage_event(voyage, journal, timing):
         assert e["time"] == stamp(e["elapsedSec"])
         before = records[records.index(e) - 1]
         assert (before["type"], before["elapsedSec"]) == ("state", e["elapsedSec"])
-    assert events[0]["etaSec"] == pytest.approx(timing["steps"] - timing["caution"])
-    assert [e["etaSec"] for e in events[2:]] == [0, None]
+    assert [e["etaSec"] for e in events] == [60, 30, 0, None]
     assert events[0]["message"] == "B 구역 주의 (이전 정상, 한계까지 60 초)"
     assert events[1]["message"] == "B 구역 경계 (이전 주의, 한계까지 30 초)"
     assert events[2]["message"] == "B 구역 침수 (이전 경계, 한계 도달)"

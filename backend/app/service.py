@@ -647,19 +647,19 @@ class Experiment:
             alerts=bulletin(watch),
         )
 
-    # 단계 전환 사건 한 줄. 도달 초는 반올림, 한계에 닿으면 "한계 도달", 안 오르면 생략
+    # 단계 전환 사건 한 줄. 도달 초(올림한 정수)가 0 이면 "한계 도달", 안 오르면 생략
     def advisory(
         self,
         zone: str,
         previous: str,
         stage: str,
-        eta_s: float | None,
+        eta_s: int | None,
         elapsed_s: float,
         time: datetime,
     ) -> dict:
         tail = ""  # 도달 예상 설명
         if eta_s is not None:
-            tail = ", 한계 도달" if eta_s == 0 else f", 한계까지 {round(eta_s)} 초"
+            tail = ", 한계 도달" if eta_s == 0 else f", 한계까지 {eta_s} 초"
         message = f"{zone} 구역 {STAGE_LABELS[stage]} (이전 {STAGE_LABELS[previous]}{tail})"
         return event(
             "stage",

@@ -99,21 +99,28 @@ def patrol(
     }
 
 
-# 정상이 아닌 구역의 경보를 A·B·C 순서로 {"zone", "stage", "etaSec"} 모양으로 냄
+# 도달 예상 초를 올림한 정수 초로. 1 초 안도 1 이라 0(한계 도달)과 섞이지 않음. 없거나 무한이면 None
+def countdown(eta_s: float | None) -> int | None:
+    if eta_s is None or not math.isfinite(eta_s):
+        return None
+    return math.ceil(eta_s)
+
+
+# 정상이 아닌 구역의 경보를 A·B·C 순서로 {"zone", "stage", "etaSec"} 모양으로 냄. 도달 초는 올림
 def bulletin(watches: dict[str, Watch]) -> tuple[dict, ...]:
     return tuple(
-        {"zone": z, "stage": watch.stage, "etaSec": watch.eta_s}
+        {"zone": z, "stage": watch.stage, "etaSec": countdown(watch.eta_s)}
         for z in ZONES
         if (watch := watches.get(z, Watch())).stage != "safe"
     )
 
 
-# 단계가 바뀐 구역을 (구역, 이전 단계, 지금 단계, 도달 초)로 A·B·C 순서로 냄
+# 단계가 바뀐 구역을 (구역, 이전 단계, 지금 단계, 올림한 도달 초)로 A·B·C 순서로 냄
 def shifts(
     before: dict[str, Watch], after: dict[str, Watch]
-) -> list[tuple[str, str, str, float | None]]:
+) -> list[tuple[str, str, str, int | None]]:
     return [
-        (z, before.get(z, Watch()).stage, after[z].stage, after[z].eta_s)
+        (z, before.get(z, Watch()).stage, after[z].stage, countdown(after[z].eta_s))
         for z in ZONES
         if before.get(z, Watch()).stage != after[z].stage
     ]

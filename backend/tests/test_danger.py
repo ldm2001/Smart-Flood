@@ -7,6 +7,7 @@ from app.core.danger import (
     Rule,
     Watch,
     bulletin,
+    countdown,
     outlook,
     patrol,
     shifts,
@@ -45,6 +46,17 @@ OUTLOOKS = {  # 이름 → (수위 m, 변화율 m/s, 유지 중 단계, 기대 �
     "held-evacuate-below-band": (0.0359, -0.001, "evacuate", "safe", None),
     "held-caution-no-band": (0.037, -0.001, "caution", "safe", None),
     "rising-slowly": (0.0, 1e-9, "safe", "safe", 4e7),
+}
+
+COUNTDOWNS = {  # 이름 → (도달 초, 기대 정수 초). 올림이라 1 초 안도 1, 0 은 한계 도달뿐
+    "under-one": (0.3, 1),
+    "half": (2.5, 3),
+    "whole": (30.0, 30),
+    "just-over": (30.000001, 31),
+    "long-fraction": (59.70588235294117, 60),
+    "reached": (0.0, 0),
+    "still": (None, None),
+    "endless": (math.inf, None),
 }
 
 
@@ -92,6 +104,13 @@ def test_outlook_refuses_non_finite_inputs(config, level, rate):
     rule = Rule.config(config)
     with pytest.raises(ValueError):
         outlook(level, rate, rule.thresholds_m["A"], rule)
+
+
+@pytest.mark.parametrize("eta, sec", COUNTDOWNS.values(), ids=COUNTDOWNS.keys())
+# 도달 초를 올림한 정수 초로 내고, 없거나 무한이면 None 인지 검사
+def test_countdown_ceils_the_eta_to_whole_seconds(eta, sec):
+    got = countdown(eta)
+    assert got == sec and type(got) is type(sec)
 
 
 # 오르는 쪽 전환은 바로 되는지 검사
@@ -157,7 +176,7 @@ def test_patrol_grades_every_zone_with_its_own_threshold(config):
     assert watches["C"] == Watch("evacuate", 0.0, None)
 
 
-# 경보 목록은 정상이 아닌 구역만 A·B·C 순서로 담는지 검사
+# 경보 목록은 정상이 아닌 구역만 A·B·C 순서로, 도달 초는 올림한 정수로 담는지 검사
 def test_bulletin_lists_only_zones_above_safe_in_zone_order():
     watches = {
         "C": Watch("warning", 12.5, None),
@@ -166,21 +185,21 @@ def test_bulletin_lists_only_zones_above_safe_in_zone_order():
     }
     assert bulletin(watches) == (
         {"zone": "A", "stage": "evacuate", "etaSec": 0.0},
-        {"zone": "C", "stage": "warning", "etaSec": 12.5},
+        {"zone": "C", "stage": "warning", "etaSec": 13},
     )
     assert bulletin({z: Watch() for z in ZONES}) == ()
 
 
-# 단계가 바뀐 구역만 (구역, 이전, 지금, 도달 초)로 A·B·C 순서로 내는지 검사
+# 단계가 바뀐 구역만 (구역, 이전, 지금, 올림한 도달 초)로 A·B·C 순서로 내는지 검사
 def test_shifts_lists_zones_whose_stage_changed():
     before = {"A": Watch(), "B": Watch("caution", 40.0, None), "C": Watch("warning", 20.0, None)}
     after = {
-        "A": Watch("caution", 55.0, None),
+        "A": Watch("caution", 54.2, None),
         "B": Watch("caution", 35.0, None),
         "C": Watch("safe", None, None),
     }
-    assert shifts(before, after) == [("A", "safe", "caution", 55.0), ("C", "warning", "safe", None)]
+    assert shifts(before, after) == [("A", "safe", "caution", 55), ("C", "warning", "safe", None)]
     assert shifts(after, after) == []
-    assert shifts({}, {"A": Watch(), "B": Watch(), "C": Watch("caution", 1.0, None)}) == [
-        ("C", "safe", "caution", 1.0)
+    assert shifts({}, {"A": Watch(), "B": Watch(), "C": Watch("caution", 0.4, None)}) == [
+        ("C", "safe", "caution", 1)
     ]
