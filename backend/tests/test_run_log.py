@@ -87,6 +87,25 @@ class Blocker(Breaker):
         raise OSError(errno.EACCES, "Permission denied", str(self.inner.directory))
 
 
+# 기록기 Journal 의 대역. 남은 줄 수(room)까지만 받고, 넘치는 쓰기는 통째로 거절
+class Quota(Breaker):
+    # 진짜 기록기와 남은 줄 수를 받음
+    def __init__(self, inner, room: float = math.inf) -> None:
+        super().__init__(inner)
+        self.room = room
+
+    # 한 줄도 묶음으로 씀
+    def entry(self, experiment_id, record):
+        self.batch(experiment_id, [record])
+
+    # 남은 줄 수를 넘으면 하나도 쓰지 않고 실패
+    def batch(self, experiment_id, records):
+        if len(records) > self.room:
+            raise OSError(*DISK_FULL)
+        self.room -= len(records)
+        self.inner.batch(experiment_id, records)
+
+
 
 # 기록할 값 정리: 무한·NaN 은 글자로 쓰는지 검사
 def test_json_safe_writes_non_finite_numbers_as_text():
@@ -485,3 +504,19 @@ def test_a_tick_the_log_cannot_take_stops_the_run(builder, clock, journal, caplo
     assert [r.levelno for r in caplog.records] == [logging.ERROR, logging.WARNING]
     error = caplog.records[0].exc_info[1]
     assert isinstance(error, Outage) and isinstance(error.__cause__, OSError)
+
+
+# 기록이 한 tick 의 줄을 다 받지 못하면 그 tick 의 obs 줄도 남지 않는지 검사
+def test_a_tick_the_log_cannot_take_whole_leaves_none_of_its_lines(
+    builder, clock, journal, config
+):
+    log = Quota(journal)
+    source = Script(readout(config, a_mm=20, b_mm=10, weight_g=150))  # tick 마다 obs 한 줄
+    client, service = session(builder, clock, source=source, experiment_log=log, seconds=1)
+    written = lines(journal)
+    log.room = 1  # 한 줄 자리만 남음: obs 와 state 를 함께 받을 수 없음
+    clock.jump(1.0)
+    assert service.catchup() == 0
+    assert client.get("/api/state").json()["runState"] == "stopped"
+    added = lines(journal)[len(written):]
+    assert [r["type"] for r in added] == ["event"]  # obs·state 는 없고 사건 줄만 남아야 함

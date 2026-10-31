@@ -284,12 +284,14 @@ def test_api_output_keeps_every_example_field(dossier):
 
 
 # 더한 필드가 항상 있는지 검사
-def test_api_output_always_carries_the_added_fields(dossier):
+def test_api_output_always_carries_the_added_fields(dossier, config):
     for body in dossier:
         assert body["runState"] in ("idle", "running", "stopped")
         meta = body["predictionMeta"]
         assert meta["basisTime"] == body["timestamp"]
         assert meta["basisElapsedSec"] == body["elapsedSec"]
+        for z in ("A", "B", "C"):
+            assert body["zones"][z]["thresholdMm"] == config["zones"][z]["threshold_mm"]
 
 
 # 범위 밖 값은 잘라 내지 않고 응답 검증에서 실패하는지 검사(500 으로 드러남)

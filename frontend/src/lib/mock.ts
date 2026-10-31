@@ -64,7 +64,7 @@ export function demo(nowMs: number, thresholds: Thresholds): Snapshot {
       basisTime: timestamp,
       basisElapsedSec: e,
       validForSec: 5,
-      modelVersion: "mock-legacy-sim",  // 모델 이름(가짜 표시)
+      modelVersion: "mock-sim",  // 모델 이름(가짜 표시)
       assumptions: {
         rule: "현재 강우와 막힘이 예측 구간 동안 유지된다",
         rainMmPerHour: 60,  // 가정한 강우(mm/h)

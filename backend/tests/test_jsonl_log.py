@@ -1,8 +1,8 @@
 import json
 import pytest
-from app.adapters.jsonl_log import LOG_DIR, Jsonl
+from app.adapters.jsonl_log import LOG_DIR, Jsonl, dump
 from app.ports.experiment_log import Absence, Flaw
-from tests.helpers import breakage
+from tests.helpers import breakage, shortage
 
 ID = "EXP-20261022-001"
 
@@ -117,6 +117,39 @@ def test_a_write_cut_short_does_not_corrupt_the_next_line(tmp_path, monkeypatch)
     assert list(log.records(ID)) == [meta, state]  # 반쪽 줄이 남지 않았으므로 두 줄 다 읽혀야 함
 
 
+# 디스크가 차서 flush 에서 끊긴 뒤에 쓴 줄까지 읽히는지 검사(반쪽 줄을 지워야 함)
+def test_a_flush_cut_short_does_not_corrupt_the_next_line(tmp_path, monkeypatch):
+    log = Jsonl(tmp_path)
+    meta = {"type": "meta", "experimentId": ID}
+    log.entry(ID, meta)
+    shortage(monkeypatch, room=20)  # 디스크에 20 바이트만 남음(줄 하나보다 짧음)
+    with pytest.raises(OSError):
+        log.entry(ID, {"type": "obs", "elapsedSec": 1.0, "readings": {"distA_mm": 598.375}})
+    monkeypatch.undo()
+    state = {"type": "state", "elapsedSec": 2.0}
+    log.entry(ID, state)
+    assert list(log.records(ID)) == [meta, state]  # 반쪽 줄이 남지 않았으므로 두 줄 다 읽혀야 함
+
+
+# 빈 묶음은 파일을 만들지 않는지 검사
+def test_an_empty_batch_leaves_no_file(tmp_path):
+    log = Jsonl(tmp_path)
+    log.batch(ID, [])
+    assert log.index() == []
+    assert not (tmp_path / f"{ID}.jsonl").exists()
+
+
+# 쓰기 전부터 비어 있던 회차 파일은 쓰기가 끊기면 지워지는지 검사(회차 번호를 먹지 않게)
+def test_a_cut_short_write_into_an_empty_file_removes_it(tmp_path, monkeypatch):
+    log = Jsonl(tmp_path)
+    (tmp_path / f"{ID}.jsonl").write_bytes(b"")  # 앞서 끊겨 비어 있는 회차 파일
+    breakage(monkeypatch)
+    with pytest.raises(OSError):
+        log.entry(ID, {"type": "meta", "experimentId": ID})
+    monkeypatch.undo()
+    assert log.index() == []
+
+
 # 묶음 쓰기가 쓴 순서대로 들어가는지 검사
 def test_a_batch_writes_every_line_in_order(tmp_path):
     log = Jsonl(tmp_path)
@@ -133,6 +166,19 @@ def test_a_batch_cut_short_leaves_no_file(tmp_path, monkeypatch):
         log.batch(ID, [{"type": "meta", "experimentId": ID}, {"type": "cmd", "kind": "start"}])
     monkeypatch.undo()
     assert log.index() == []
+
+
+# 비어 있지 않은 파일에 여러 줄을 붙이다 둘째 줄에서 끊기면 다 들어간 첫째 줄도 남지 않는지 검사
+def test_a_batch_cut_short_in_its_second_line_leaves_none_of_its_lines(tmp_path, monkeypatch):
+    log = Jsonl(tmp_path)
+    meta = {"type": "meta", "experimentId": ID}
+    log.entry(ID, meta)
+    obs = {"type": "obs", "elapsedSec": 1.0, "readings": {"distA_mm": 598.375}}
+    shortage(monkeypatch, room=len(dump(obs)) + 5)  # 첫째 줄은 들어가고 둘째 줄은 5 바이트만
+    with pytest.raises(OSError):
+        log.batch(ID, [obs, {"type": "state", "elapsedSec": 1.0}])
+    monkeypatch.undo()
+    assert list(log.records(ID)) == [meta]  # 묶음은 하나도 남지 않아야 함
 
 
 @pytest.mark.parametrize(

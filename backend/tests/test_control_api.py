@@ -98,13 +98,10 @@ def test_rain_limit_comes_from_config(builder, config):
 
 
 
-# 아직 없는 입력원(live)은 501 이고 상태를 안 바꾸는지 검사
-def test_the_live_source_is_501_and_changes_nothing(client):
-    before = client.get("/api/state").json()
+# live 입력원을 받는지 검사(자세한 검사는 test_check06_devices)
+def test_the_live_source_is_accepted(client):
     response = client.post("/api/source", json={"mode": "live"})
-    assert response.status_code == 501
-    assert isinstance(response.json()["detail"], str)
-    assert client.get("/api/state").json() == before  # 상태가 그대로여야 함
+    assert (response.status_code, response.json()["dataSource"]) == (200, "live")
 
 
 # sim 입력원 요청은 그대로 유지하는지 검사

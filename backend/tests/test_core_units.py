@@ -41,11 +41,11 @@ def bridge(flows, a, b):
 
 
 
-# 3.2 강우 유입: 60 mm/h 는 0.48 L/min 이고 면적 비율로 나뉘는지 검사
-def test_rain_60mm_per_h_is_0_48_l_per_min_split_by_share(params):
+# 3.2 강우 유입: 60 mm/h 는 0.17 L/min(바닥 0.17 m², REV16)이고 면적 비율로 나뉘는지 검사
+def test_rain_60mm_per_h_is_0_17_l_per_min_split_by_share(params):
     flows = flux(baseline(params), Conditions(rain_mm_per_h=60.0), params)
     total = sum(flows.rain_m3s.values())
-    assert total * 1000 * 60 == pytest.approx(0.48)  # 합계가 0.48 L/min 이어야 함
+    assert total * 1000 * 60 == pytest.approx(0.17)  # 합계가 0.17 L/min 이어야 함
     shares = {"A": 0.40, "B": 0.35, "C": 0.25}
     assert flows.rain_m3s == pytest.approx({z: total * s for z, s in shares.items()})
 
@@ -147,7 +147,7 @@ def test_level_rates_are_net_inflow_over_storage_area(params):
     # A 2 mm, B 10 mm, C 10 mm. B→A, C→B 로 월류가 생김
     state = point(params, A=0.002, B=0.010, C=0.010)
     cond = Conditions(rain_mm_per_h=90.0, blockage={"INLET-02": "partial"})
-    rain = 90.0 / 3.6e6 * 0.48  # 전체 강우 유입(m³/s) = 비 세기 × 집수 면적 0.48 m²
+    rain = 90.0 / 3.6e6 * 0.17  # 전체 강우 유입(m³/s) = 비 세기 × 집수 면적 0.17 m²
     q_ba = 0.55 * 0.005**1.5  # B→A 월류량. A 수면 0.002 는 경계 아래라 s = 1
     q_cb = 0.55 * 0.005**1.5  # C→B 월류량. B 수면 0.030 도 C–B 경계 0.065 아래
     orifice = 0.6 * 0.00030  # 오리피스 계수 × 면적
@@ -156,11 +156,11 @@ def test_level_rates_are_net_inflow_over_storage_area(params):
     rates = gradient(state, cond, params)  # 구역별 수위 변화율(m/s)을 구
     assert rates == pytest.approx(
         {
-            # A: 비 + B→A 월류 − 배수, 나누기 저류 면적 0.10
-            "A": (rain * 0.40 + q_ba - drain_a) / 0.10,
-            # B: 비 + C→B 월류 − B→A 월류 − 배수, 면적 0.10
-            "B": (rain * 0.35 + q_cb - q_ba - drain_b) / 0.10,
-            "C": (rain * 0.25 - q_cb) / 0.08,  # C: 비 − C→B 월류, 면적 0.08
+            # A: 비 + B→A 월류 − 배수, 나누기 저류 면적 0.035
+            "A": (rain * 0.40 + q_ba - drain_a) / 0.035,
+            # B: 비 + C→B 월류 − B→A 월류 − 배수, 면적 0.035
+            "B": (rain * 0.35 + q_cb - q_ba - drain_b) / 0.035,
+            "C": (rain * 0.25 - q_cb) / 0.028,  # C: 비 − C→B 월류, 면적 0.028
         }
     )
 
@@ -232,6 +232,21 @@ def test_distance_outside_range_is_invalid(probe, edge):
     assert waterline(edge(probe), probe) is None  # 무효(None)여야 함
 
 
+# 설치 높이보다 먼 거리(바닥 아래)는 범위 안이면 수위 0 인지 검사. 설정값에 기대지 않고 센서를 만듦
+def test_distance_beyond_the_install_height_reads_as_dry():
+    sensor = Sensor(
+        install_height_mm=600.0, zero_offset_mm=0.0, scale=1.0,
+        min_range_mm=200.0, max_range_mm=650.0,  # 최대 범위가 설치 높이보다 멂
+    )
+    assert waterline(601.0, sensor) == 0.0
+    assert waterline(650.0, sensor) == 0.0
+
+
+# 센서 보정값이 유한하지 않으면 수위도 NaN 으로 남는지 검사(0 으로 바뀌면 뒤에서 거를 수 없음)
+def test_a_nan_sensor_value_keeps_the_level_nan(probe):
+    assert math.isnan(waterline(412.0, replace(probe, install_height_mm=math.nan)))
+
+
 # 영점 보정값과 배율이 적용되는지 검사
 def test_zero_offset_and_scale_apply(probe):
     sensor = replace(probe, zero_offset_mm=5.0, scale=1.1)
@@ -259,13 +274,13 @@ def test_weight_to_drained_volume(config):
 def test_correction_moves_model_toward_observation(params):
     state = point(params, A=0.020, B=0.010, C=0.005)
     corrected, records = adjustment(state, {"A": 0.030}, 0.3, params)
-    # A 부피: 0.002 + 0.3 × (0.003 − 0.002) = 0.0023 m³
-    assert corrected.V["A"] == pytest.approx(0.0023)
+    # A 부피(면적 0.035): 0.0007 + 0.3 × (0.00105 − 0.0007) = 0.000805 m³
+    assert corrected.V["A"] == pytest.approx(0.000805)
     assert (corrected.V["B"], corrected.V["C"]) == (state.V["B"], state.V["C"])
     (record,) = records
     assert (record.zone, record.before_m3, record.after_m3) == ("A", state.V["A"], corrected.V["A"])
-    assert record.delta_m3 == pytest.approx(0.0003)
-    assert corrected.correction_m3 == pytest.approx(0.0003)
+    assert record.delta_m3 == pytest.approx(0.000105)
+    assert corrected.correction_m3 == pytest.approx(0.000105)
 
 
 # C 구역은 보정하지 않는지 검사
