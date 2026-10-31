@@ -39,13 +39,13 @@ def test_limiter_step_conserves_water(params):
     assert abs(residual(start, end, rain)) <= TOL_M3
 
 
-# 관측 보정을 섞어도 물이 보존되는지 검사. A 관측은 덧셈 편향(곱셈 편향은 보정과 되먹임해 발산)
+# 관측 보정을 섞어도 물이 보존되는지 검사
 def test_experiment_with_observation_correction_conserves_water(config, params):
     state = start = baseline(params)
     for t in range(EXPERIMENT_S):  # 실험 시간 동안 1초씩 반복
         state = evolution(state, climate(EXPERIMENT, t), params, 1.0)
         observed = {  # 가짜 관측 수위(m)를 만듦
-            "A": depth("A", state.V["A"], params) + 0.001,  # A 는 실제보다 1 mm 높게
+            "A": depth("A", state.V["A"], params) * 1.2 + 0.001,  # A 는 실제보다 20 % 높게 + 1 mm
             "B": depth("B", state.V["B"], params) * 0.8,  # B 는 실제보다 20 % 낮게
         }
         state, _ = adjustment(state, observed, config["correction"]["gain"], params)

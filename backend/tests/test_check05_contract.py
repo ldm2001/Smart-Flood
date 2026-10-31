@@ -16,9 +16,9 @@ SPEC_EXAMPLE = {  # 지시서 4.1 의 응답 예시
     "timestamp": "2026-10-22T10:00:00+09:00",
     "elapsedSec": 42,
     "zones": {
-        "A": {"levelMm": 31.2, "rateMmSec": 0.24, "source": "simulated", "thresholdMm": 40},
-        "B": {"levelMm": 22.7, "rateMmSec": 0.16, "source": "simulated", "thresholdMm": 70},
-        "C": {"levelMm": 15.4, "rateMmSec": 0.10, "source": "estimated", "thresholdMm": 110},
+        "A": {"levelMm": 31.2, "rateMmSec": 0.24, "source": "simulated"},  # A 구역: 가상 실측
+        "B": {"levelMm": 22.7, "rateMmSec": 0.16, "source": "simulated"},  # B 구역: 가상 실측
+        "C": {"levelMm": 15.4, "rateMmSec": 0.10, "source": "estimated"},  # C 구역: 모델 추정
     },
     "predictions": {  # 구역별 10·20·30초 뒤 예측 수위(mm)
         "A": {"10": 33.6, "20": 36.0, "30": 38.4},
