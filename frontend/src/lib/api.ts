@@ -1,4 +1,4 @@
-import { ceilings, contract, type Snapshot, type Zone } from "./schema";
+import { ceilings, chronicle, contract, type LogEvent, type Snapshot, type Zone } from "./schema";
 import { wall } from "./useNow";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";  // 운영은 빈 값(같은 출처)
@@ -44,4 +44,14 @@ export async function poll(): Promise<Receipt> {
 // 서버 설정의 구역별 한계 수위를 읽음
 export async function limits(): Promise<Record<Zone, number>> {
   return ceilings(await reply("/api/config"));  // 설정 주소를 읽어 한계 수위만 추출
+}
+
+// 실험 기록의 사건을 읽음. 기록이 없으면 빈 목록
+export async function logbook(id: string): Promise<LogEvent[]> {
+  try {
+    return chronicle(await reply(`/api/logs/${encodeURIComponent(id)}/events`));
+  } catch (error) {
+    if (error instanceof Failure && error.status === 404) return [];  // 기록 없음
+    throw error;
+  }
 }

@@ -5,7 +5,6 @@ import {
   caption,
   plot,
   EMPTY_HISTORY,
-  leader,
   phrase,
   verdict,
   verdicts,
@@ -21,9 +20,23 @@ import {
   roster,
   stamp,
   peak,
+  topic,
+  scope,
+  rows,
+  milestones,
+  condition,
+  readiness,
+  obstruction,
+  holding,
+  spot,
+  pool,
+  EVENT_ROWS,
   type Grade,
+  type Milestones,
 } from "./derive";
-import type { Alert, Zone, Source } from "./schema";
+import { PLAN_ZONES } from "./layout-data";
+import { demo } from "./mock";
+import type { Alert, LogEvent, StageEvent, Zone, Source } from "./schema";
 
 const plateau = (v: number) => ({ "10": v, "20": v, "30": v });
 const THRESHOLDS = { A: 45, B: 55, C: 65 };  // 구역별 한계 수위(mm)
@@ -89,16 +102,9 @@ describe("stage priority", () => {
     expect(peak(trio(status("A", "caution", 20), status("B", "caution", 20), status("C", "caution", 20))).zoneId).toBe("A");
   });
 
-  // 모두 정상이면 최악도 정상이고 먼저 닿는 구역은 없는지 검사
-  it("all safe gives a safe worst zone and no earliest zone", () => {
+  it("all safe gives a safe worst zone", () => {  // 모두 정상이면 최악도 정상인지 검사
     const zones = trio(status("A", "safe", null), status("B", "safe", null), status("C", "safe", null));
     expect(peak(zones).stage).toBe("safe");
-    expect(leader(zones)).toBeNull();  // 먼저 닿는 구역은 없어야 함(null)
-  });
-
-  it("earliest picks the smallest eta", () => {
-    const zones = trio(status("A", "caution", 30), status("B", "safe", null), status("C", "caution", 20));
-    expect(leader(zones)?.zoneId).toBe("C");  // 먼저 닿는 구역은 C 여야 함
   });
 
   it("alerts list only non-safe zones in A, B, C order", () => {
@@ -127,7 +133,7 @@ describe("roster", () => {
     const alerts: Alert[] = [
       { zone: "A", stage: "caution", etaSec: 20 },  // 주의 20초
       { zone: "A", stage: "evacuate", etaSec: 0 },  // 침수 0초(가장 높음)
-      { zone: "A", stage: "warning", etaSec: 10 },  // 경고 10초(침수보다 낮음)
+      { zone: "A", stage: "warning", etaSec: 10 },  // 경계 10초(침수보다 낮음)
     ];
     expect(roster(alerts).A).toEqual(status("A", "evacuate", 0));
   });
@@ -419,5 +425,210 @@ describe("columns", () => {
 
   it("lets labels exactly one label height apart share a column", () => {
     expect(columns({ A: 150, B: 122, C: 94 }, 28)).toEqual({ A: 0, B: 0, C: 0 });
+  });
+});
+
+const T0 = Date.UTC(2026, 9, 22, 1, 0, 0);  // 회차 시작 시각(2026-10-22 10:00 KST)
+// 측정 기록의 단계 줄임말
+const CODES = { s: "safe", c: "caution", w: "warning", e: "evacuate" } as const;
+
+// 측정 기록 한 회("초 구역 이전 새 etaSec" 를 ; 로 이음)를 단계 사건 목록으로 바꾸는 도우미
+function run(text: string): StageEvent[] {
+  return text.split(";").map((line): StageEvent => {
+    const [sec, zone, from, to, eta] = line.trim().split(" ");
+    const stage = CODES[to as keyof typeof CODES];
+    const previous = CODES[from as keyof typeof CODES];
+    return {
+      type: "event",
+      kind: "stage",
+      elapsedSec: Number(sec),
+      time: stamp(T0 + Number(sec) * 1000),
+      message: `${zone} 구역 ${stage} (이전 ${previous})`,
+      zone: zone as Zone,
+      stage,
+      previous,
+      etaSec: eta === "-" ? null : Number(eta),  // - 는 안 오름(null)
+    };
+  });
+}
+
+const R1 = run(  // 설계 1.3 의 기울기 측정 r1~r4
+  "67 A s e 0; 97 B s c 43; 98 B c w 28; 140 B w s -; 143 C s c 44; 147 C c w 30; 155 B s w 1",
+);
+const R2 = run(
+  "33 A s e 0; 50 B s w 5; 65 C s c 49; 66 B w s -; 67 B s w 1; 68 C c w 16; 77 B w e 0; " +
+    "81 C w s -",
+);
+const R3 = run(
+  "63 A s e 0; 84 B s w 27; 122 B w s -; 132 C s c 41; 133 C c w 27; 135 B s w 1; 151 C w s -; " +
+    "153 B w e 0",
+);
+const R4 = run("123 A s e 0; 173 B s w 14; 203 B w s -; 223 B s w 1");
+const FAULT: LogEvent = {  // 계산 오류 사건(154초)
+  type: "event",
+  kind: "calc_error",
+  elapsedSec: 154,
+  time: "2026-10-22T10:02:34.123456+09:00",
+  message: "Underflow: A 저장량이 -0.001 m³ 다",
+};
+const LIVE = { ...demo(T0, THRESHOLDS), experimentId: "EXP-20261101-001" };  // 기록 꼴 번호의 상태
+
+// 타임라인 세 사건의 경과 초. 없으면 null
+const seconds = (m: Milestones) =>
+  [m.judgement, m.request, m.arrival].map((event) => event?.elapsedSec ?? null);
+// 사건의 경과 밀리초. 없으면 null
+const at = (event: StageEvent | null) => (event === null ? null : event.elapsedSec * 1000);
+
+describe("topic", () => {
+  it("reads only record ids", () => {
+    expect(topic(null)).toBeNull();
+    expect(topic({ ...LIVE, experimentId: "EXP-STANDBY" })).toBeNull();
+    expect(topic({ ...LIVE, experimentId: "EXP-DEMO-001" })).toBeNull();
+    expect(topic(LIVE)?.[1]).toBe("EXP-20261101-001");
+  });
+
+  it("changes with stages and the run state but not with etaSec", () => {
+    const alerts: Alert[] = [{ zone: "B", stage: "warning", etaSec: 27 }];
+    const base = { ...LIVE, alerts };
+    const variant = (alert: Alert) => topic({ ...base, alerts: [alert] });  // 경보 하나만 바꾼 키
+    const key = topic(base);
+    expect(key).toEqual(["events", "EXP-20261101-001", "B:warning", "running"]);
+    expect(variant({ zone: "B", stage: "warning", etaSec: 5 })).toEqual(key);
+    expect(variant({ zone: "B", stage: "evacuate", etaSec: 0 })).not.toEqual(key);
+    expect(topic({ ...base, runState: "stopped" })).not.toEqual(key);
+    expect(topic({ ...base, runState: undefined })?.[3]).toBe("none");
+  });
+});
+
+describe("scope", () => {
+  it("hides future events in a replay but keeps the same second", () => {
+    const seen = scope(R3, { mode: "replay", elapsedSec: 135 }).map((event) => event.elapsedSec);
+    expect(seen).toEqual([63, 84, 122, 132, 133, 135]);
+  });
+
+  it("leaves a live list alone, even an error one tick ahead", () => {
+    const list = [...R3, FAULT];
+    expect(scope(list, { mode: "live", elapsedSec: 153 })).toBe(list);
+  });
+});
+
+describe("rows", () => {
+  it("keeps the newest 30, newest first", () => {
+    const list = rows(run(Array.from({ length: 31 }, (_, i) => `${i} A s c 50`).join(";")));
+    expect(list).toHaveLength(EVENT_ROWS);
+    expect(list[0].elapsedSec).toBe(30);
+    expect(list.at(-1)?.elapsedSec).toBe(1);
+  });
+});
+
+describe("milestones", () => {
+  it("picks the episode that holds the first evacuate", () => {
+    expect(seconds(milestones(R2, "B"))).toEqual([67, 67, 77]);
+    expect(seconds(milestones(R3, "B"))).toEqual([135, 135, 153]);
+  });
+
+  it("uses the one evacuate event for all three when a zone jumps from safe", () => {
+    for (const events of [R1, R2, R3, R4]) {
+      const { judgement, request, arrival } = milestones(events, "A");
+      expect(judgement?.stage).toBe("evacuate");
+      expect(request).toBe(judgement);
+      expect(arrival).toBe(judgement);
+    }
+  });
+
+  it("falls back to the last episode that left safe, with no arrival", () => {
+    expect(seconds(milestones(R1, "B"))).toEqual([155, 155, null]);
+    expect(seconds(milestones(R1, "C"))).toEqual([143, 147, null]);
+    expect(seconds(milestones(R2, "C"))).toEqual([65, 68, null]);
+    expect(seconds(milestones(R3, "C"))).toEqual([132, 133, null]);
+    expect(seconds(milestones(R4, "B"))).toEqual([223, 223, null]);
+  });
+
+  it("keeps the episode a replay cut at 122 s shows", () => {
+    const cut = scope(R3, { mode: "replay", elapsedSec: 122 });
+    expect(seconds(milestones(cut, "B"))).toEqual([84, 84, null]);
+  });
+
+  it("has no request while the episode stays at caution", () => {
+    expect(seconds(milestones(run("5 C s c 50"), "C"))).toEqual([5, null, null]);
+  });
+
+  it("gives nothing without an episode", () => {
+    expect(seconds(milestones(run("10 A c s -"), "A"))).toEqual([null, null, null]);  // 정상 사건만
+    expect(seconds(milestones([], "A"))).toEqual([null, null, null]);
+    expect(seconds(milestones(R4, "C"))).toEqual([null, null, null]);
+  });
+
+  it("skips calculation errors mixed into the list", () => {
+    const mixed = [...R3.slice(0, 6), { ...FAULT, elapsedSec: 140 }, ...R3.slice(6)];
+    expect(seconds(milestones(mixed, "B"))).toEqual([135, 135, 153]);
+  });
+});
+
+describe("lead", () => {
+  it("is arrival minus judgement from the event seconds", () => {
+    const b2 = milestones(R2, "B");
+    const b3 = milestones(R3, "B");
+    const c3 = milestones(R3, "C");
+    expect(lead(at(b2.judgement), at(b2.arrival))).toBe(10);
+    expect(lead(at(b3.judgement), at(b3.arrival))).toBe(18);
+    expect(lead(at(c3.judgement), at(c3.arrival))).toBeNull();
+  });
+});
+
+describe("devices", () => {
+  it("labels known values and shows unknown ones as they are", () => {
+    expect(condition("online")).toEqual({ label: "정상", ok: true });
+    expect(condition("normal")).toEqual({ label: "정상", ok: true });
+    expect(condition("offline")).toEqual({ label: "끊김", ok: false });
+    expect(condition("unknown")).toEqual({ label: "미상", ok: false });
+    expect(condition("tripped")).toEqual({ label: "tripped", ok: false });
+    expect(condition("constructor")).toEqual({ label: "constructor", ok: false });
+  });
+
+  it("is ready only when all four protection inputs are healthy", () => {
+    expect(readiness(LIVE.devices)).toBe(true);  // 시뮬레이션 장치 값
+    const rev16 = {  // REV16 실측 입력의 장치 값
+      esp32_1: "online",
+      esp32_2: "offline",
+      floatSwitch: "unknown",
+      emergencyStop: "unknown",
+    };
+    expect(readiness(rev16)).toBe(false);
+  });
+});
+
+describe("obstruction and holding", () => {
+  it("gives the blockage type only at the blocked inlet", () => {
+    const blockage = {
+      location: "INLET-02",
+      type: "partial" as const,
+      label: "빗물받이 ② 부분 막힘",
+    };
+    const clear = { location: null, type: "none" as const, label: "정상 배수" };
+    expect(obstruction(blockage, "INLET-02")).toBe("partial");
+    expect(obstruction(blockage, "INLET-03")).toBe("none");
+    expect(obstruction(clear, "INLET-01")).toBe("none");
+  });
+
+  it("keeps a list only for the current record", () => {
+    const pack = { id: "EXP-20261101-001", list: R3 };
+    expect(holding(null, pack)).toEqual([]);
+    expect(holding("EXP-20261101-001", pack)).toBe(R3);
+    expect(holding("EXP-20261101-002", pack)).toBeNull();
+    expect(holding("EXP-20261101-001", null)).toBeNull();
+  });
+});
+
+describe("plan geometry", () => {
+  it("turns plan coordinates into CSS percentages", () => {
+    expect(spot(150, 80)).toEqual({ left: "50%", top: "50%" });
+    expect(spot(35, 100)).toEqual({ left: "11.67%", top: "62.5%" });
+  });
+
+  it("fills a zone box from the bottom", () => {
+    expect(pool(PLAN_ZONES.A, 0.5)).toEqual({ y: 60, height: 50 });
+    expect(pool(PLAN_ZONES.A, 0)).toEqual({ y: 110, height: 0 });
+    expect(pool(PLAN_ZONES.A, 1)).toEqual({ y: 10, height: 100 });
   });
 });

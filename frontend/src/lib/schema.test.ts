@@ -1,7 +1,16 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
-import { ceilings, contract, stateSchema } from "./schema";
+import {
+  alertSchema,
+  ceilings,
+  chronicle,
+  contract,
+  eventSchema,
+  eventStageSchema,
+  stageSchema,
+  stateSchema,
+} from "./schema";
 
 // 계약 문서 'GET /api/state' 아래 첫 json 블록(응답 예시)을 읽는 도우미
 function example(): Record<string, unknown> {
@@ -97,6 +106,11 @@ describe("stateSchema", () => {
     expect(stateSchema.safeParse(variant((b) => (b.alerts[0].stage = "danger"))).success).toBe(false);
   });
 
+  it("rejects a fractional alert etaSec", () => {
+    expect(alertSchema.safeParse({ zone: "A", stage: "caution", etaSec: 20.5 }).success).toBe(false);
+    expect(alertSchema.safeParse({ zone: "A", stage: "caution", etaSec: 21 }).success).toBe(true);
+  });
+
   it("rejects outputsLocked false", () => {
     expect(stateSchema.safeParse(variant((b) => (b.outputsLocked = false))).success).toBe(false);
   });
@@ -146,5 +160,82 @@ describe("ceilings", () => {
     expect(() => ceilings(version((b) => (b.zones.B.threshold_mm = 0)))).toThrow(ZodError);
     expect(() => ceilings(version((b) => (b.zones.B.threshold_mm = 500.1)))).toThrow(ZodError);
     expect(() => ceilings(null)).toThrow(ZodError);
+  });
+});
+
+// 계약 문서 '### event (사건)' 아래 json 블록의 사건 줄들을 읽는 도우미
+function records(): unknown[] {
+  const md = readFileSync(new URL("../../../docs/api-contract.md", import.meta.url), "utf8");
+  const section = md.slice(md.indexOf("### event (사건)"));
+  const match = section.match(/```json\n([\s\S]*?)\n```/);
+  if (!match) throw new Error("api-contract.md 에서 사건 예시 블록을 찾지 못했다");
+  return match[1].split(/\n(?=\{)/).map((chunk) => JSON.parse(chunk));  // { 로 여는 줄마다 새 사건
+}
+
+const STAGE_EVENT = {  // 단계 전환 사건 한 줄(계약 예시 꼴)
+  type: "event",
+  kind: "stage",
+  elapsedSec: 25,
+  time: "2026-10-22T09:00:25.000000+09:00",
+  message: "B 구역 주의 (이전 정상, 한계까지 60 초)",
+  zone: "B",
+  stage: "caution",
+  previous: "safe",
+  etaSec: 60,
+};
+
+// 사건 예시를 고쳐 검사한 결과(통과 여부)
+function outcome(mutate: (body: Json) => void): boolean {
+  const body = structuredClone(STAGE_EVENT) as Json;
+  mutate(body);
+  return eventSchema.safeParse(body).success;
+}
+
+describe("eventSchema", () => {
+  it("accepts the docs/api-contract.md event examples", () => {
+    const list = records();
+    expect(list).toHaveLength(2);
+    for (const body of list) expect(eventSchema.safeParse(body).error?.issues).toBeUndefined();
+    expect(chronicle({ events: list }).map((event) => event.kind)).toEqual(["calc_error", "stage"]);
+  });
+
+  it("accepts a time with microseconds or without a fraction", () => {
+    expect(outcome((b) => (b.time = "2026-10-22T09:00:25.123456+09:00"))).toBe(true);
+    expect(outcome((b) => (b.time = "2026-10-22T09:00:25+09:00"))).toBe(true);
+  });
+
+  it("rejects an unknown kind or stage", () => {
+    expect(outcome((b) => (b.kind = "pump"))).toBe(false);
+    expect(outcome((b) => (b.stage = "danger"))).toBe(false);
+    expect(outcome((b) => (b.previous = "flood"))).toBe(false);
+    expect(outcome((b) => (b.zone = "D"))).toBe(false);
+  });
+
+  it("rejects a negative, fractional or missing etaSec", () => {
+    expect(outcome((b) => (b.etaSec = -1))).toBe(false);
+    expect(outcome((b) => (b.etaSec = 1.5))).toBe(false);
+    expect(outcome((b) => delete b.etaSec)).toBe(false);
+    expect(outcome((b) => (b.etaSec = null))).toBe(true);
+    expect(outcome((b) => (b.etaSec = 0))).toBe(true);
+  });
+
+  it("rejects a Z offset time and a state line", () => {
+    expect(outcome((b) => (b.time = "2026-10-22T00:00:25Z"))).toBe(false);
+    expect(outcome((b) => (b.type = "state"))).toBe(false);
+  });
+
+  it("keeps unknown fields", () => {
+    const [event] = chronicle({ events: [{ ...STAGE_EVENT, note: "x" }], extra: 1 });
+    expect(event).toMatchObject({ note: "x", zone: "B" });
+  });
+
+  it("takes safe as an event stage but not as an alert stage", () => {
+    expect(eventStageSchema.safeParse("safe").success).toBe(true);
+    expect(stageSchema.safeParse("safe").success).toBe(false);
+  });
+
+  it("chronicle throws on a body without valid events", () => {
+    expect(() => chronicle({})).toThrow(ZodError);
+    expect(() => chronicle({ events: [{ ...STAGE_EVENT, zone: null }] })).toThrow(ZodError);
   });
 });

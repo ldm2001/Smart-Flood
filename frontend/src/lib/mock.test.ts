@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MOCK_CYCLE_SEC, trail, demo } from "./mock";
-import { stateSchema, type Snapshot, type Zone } from "./schema";
+import { MOCK_CYCLE_SEC, trail, demo, diary } from "./mock";
+import { eventSchema, stateSchema, type Snapshot, type StageEvent, type Zone } from "./schema";
 
 const THRESHOLDS = { A: 45, B: 55, C: 65 };  // 구역별 한계 수위(mm)
 const BASE = Date.UTC(2026, 9, 23, 1, 0, 0);  // 기준 시각(2026-10-23 01:00 UTC)
@@ -146,5 +146,55 @@ describe("trail", () => {
   it("starts over with each cycle", () => {
     expect(trail(BASE + (MOCK_CYCLE_SEC - 1) * 1000)).toHaveLength(MOCK_CYCLE_SEC);
     expect(trail(BASE + MOCK_CYCLE_SEC * 1000)).toEqual([{ t: BASE + MOCK_CYCLE_SEC * 1000, A: 12, B: 8, C: 4 }]);
+  });
+});
+
+describe("diary", () => {
+  const log = (e: number) => diary(BASE + e * 1000, THRESHOLDS);  // 주기 안 e 초까지의 사건
+
+  it("logs each stage change from the cycle start in the server wording", () => {
+    expect(log(0)).toEqual([]);
+    expect(log(70).map((event) => [event.elapsedSec, event.message])).toEqual([
+      [41, "A 구역 주의 (이전 정상, 한계까지 30 초)"],
+      [61, "A 구역 경계 (이전 주의, 한계까지 10 초)"],
+    ]);
+    expect(log(179).map((event) => event.message)).toEqual([
+      "A 구역 주의 (이전 정상, 한계까지 30 초)",
+      "A 구역 경계 (이전 주의, 한계까지 10 초)",
+      "A 구역 침수 (이전 경계, 한계 도달)",
+      "B 구역 주의 (이전 정상, 한계까지 30 초)",
+      "B 구역 경계 (이전 주의, 한계까지 10 초)",
+      "B 구역 침수 (이전 경계, 한계 도달)",
+    ]);
+  });
+
+  it("passes the event schema with KST times on the cycle clock", () => {
+    for (const event of log(179)) {
+      expect(eventSchema.safeParse(event).error?.issues, event.message).toBeUndefined();
+    }
+    expect(log(70)[0].time).toBe("2026-10-23T10:00:41.000+09:00");
+    expect(diary(BASE + 70_999, THRESHOLDS)).toEqual(log(70));
+    expect(diary(BASE + (MOCK_CYCLE_SEC + 70) * 1000, THRESHOLDS)[0].time).toBe(
+      "2026-10-23T10:03:41.000+09:00",  // 다음 주기도 그 주기 시작부터
+    );
+  });
+
+  it("ends each zone on the stage the demo alerts show", () => {
+    for (let e = 0; e < MOCK_CYCLE_SEC; e += 1) {
+      const events = log(e);
+      for (const zone of ["A", "B", "C"] as const) {
+        const own = events.filter(
+          (event): event is StageEvent => event.kind === "stage" && event.zone === zone,
+        );
+        const shown = notice(frame(e), zone)?.stage ?? "safe";  // 경보에 없으면 정상
+        expect(own.at(-1)?.stage ?? "safe", `${zone} e=${e}`).toBe(shown);
+      }
+    }
+  });
+
+  it("uses the thresholds it is given", () => {
+    expect(diary(BASE, { A: 10, B: 55, C: 65 }).map((event) => event.message)).toEqual([
+      "A 구역 침수 (이전 정상, 한계 도달)",
+    ]);
   });
 });

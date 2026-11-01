@@ -24,7 +24,7 @@ const horizons = z.looseObject({ "10": level, "20": level, "30": level });
 export const alertSchema = z.looseObject({
   zone: zoneIdSchema,
   stage: stageSchema,
-  etaSec: z.number().min(0).nullable().optional(),  // 도달까지 남은 초. 없을 수 있음
+  etaSec: z.number().int().min(0).nullable().optional(),  // 도달까지 남은 초. 없을 수 있음
 });
 
 const predictionMeta = z.looseObject({
@@ -57,8 +57,7 @@ export const stateSchema = z.looseObject({  // 상태 응답(/api/state) 전체.
   }),
   blockage: z.looseObject({
     location: z.string().nullable(),
-    // 막힘 종류
-    type: blockageTypeSchema,
+    type: blockageTypeSchema,  // 막힘 종류
     label: z.string(),
   }),
   devices: z.looseObject({
@@ -74,6 +73,27 @@ export const stateSchema = z.looseObject({  // 상태 응답(/api/state) 전체.
   runState: runStateSchema.nullable().optional(),
   predictionMeta: predictionMeta.nullable().optional(),
 });
+
+// 사건 단계(정상·주의·경계·침수). 경보 단계와 달리 정상을 담음
+export const eventStageSchema = z.enum(["safe", "caution", "warning", "evacuate"]);
+const eventBase = {  // 두 사건 꼴의 공통 칸
+  type: z.literal("event"),
+  elapsedSec: z.number().min(0).max(864_000),
+  time: kstTime,
+  message: z.string(),
+};
+export const eventSchema = z.discriminatedUnion("kind", [  // 기록의 사건 한 줄. 모르는 칸은 남김
+  z.looseObject({ ...eventBase, kind: z.literal("calc_error") }),
+  z.looseObject({
+    ...eventBase,
+    kind: z.literal("stage"),
+    zone: zoneIdSchema,
+    stage: eventStageSchema,
+    previous: eventStageSchema,
+    etaSec: z.number().int().min(0).nullable(),  // 올림한 정수 초. 침수면 0, 안 오르면 null
+  }),
+]);
+export const eventsSchema = z.looseObject({ events: z.array(eventSchema) });  // 사건 응답
 
 // 서버 상태 타입
 export type Snapshot = z.infer<typeof stateSchema>;
@@ -93,10 +113,19 @@ export type Run = z.infer<typeof runStateSchema>;
 export type Alert = z.infer<typeof alertSchema>;
 // 시점별 예측 타입
 export type Horizons = z.infer<typeof horizons>;
+// 기록 사건 타입
+export type LogEvent = z.infer<typeof eventSchema>;
+// 단계 전환 사건 타입
+export type StageEvent = Extract<LogEvent, { kind: "stage" }>;
 
 // 응답을 검사. 어긋나면 던지고 호출한 쪽(폴링)이 연결 오류로 처리
 export function contract(body: unknown): Snapshot {
   return stateSchema.parse(body);
+}
+
+// 사건 응답을 검사해 사건 목록만 돌려줌
+export function chronicle(body: unknown): LogEvent[] {
+  return eventsSchema.parse(body).events;
 }
 
 const thresholdMm = z.number().gt(0).max(500);  // 한계 수위(mm): 0 초과 500 이하
