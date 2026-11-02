@@ -15,13 +15,13 @@ A·B·C 세 구역으로 나눈 도시 침수 모형 실험을 위한 백엔드�
 | `backend/` | FastAPI 서버. `app/core/` 순수 모델·예측·보정, `app/ports/` 입출력 포트, `app/adapters/` 구현(가상 센서·시계·JSONL 기록·재생), `app/api/` 라우터 |
 | `frontend/` | 새 관제 웹. Next.js 정적 export(`out/`). 준비·명령·검증은 `frontend/README.md` |
 | `docs/api-contract.md` | `/api/state` 와 제어 API 계약 |
-| `firmware/` | ESP32 펌웨어. 본 펌웨어(`board/`, Arduino)와 MicroPython 노드(`python/`)가 `/api/ingest` 로 보낸다. 부품 시험 스케치(`parts/`)와 통합 시험(`node/`)도 있다. 배선·순서·통과 기준·서버 연결은 `firmware/README.md` |
+| `firmware/` | ESP32 펌웨어. 본 펌웨어(`board/`, Arduino)와 MicroPython 노드(`python/`)가 `/api/ingest` 로 보낸다. 부품 시험 스케치(`parts/`)와 통합 시험(`node/`)도 있다. 배선·순서·통과 기준·서버 연결과 Windows·macOS 보드 시험 따라하기는 `firmware/README.md` |
 
 이 표는 `dev` 와 `main` 에서 본 모습이다. `sim` 에는 `backend/` 와 `frontend/` 만, `sensor` 에는 `firmware/` 만 있다. 자세한 것은 "브랜치" 절을 본다.
 
 ## 실행
 
-Python 3.11 이 필요하다.
+Python 3.11 이 필요하다. 아래는 macOS 명령이다. Windows 명령과 보드를 붙일 때의 서버 띄우기(`--host 0.0.0.0`, 방화벽)는 `dev` 의 `firmware/README.md` "보드 시험 따라하기" 절에 있다.
 
 ```bash
 cd backend
@@ -116,7 +116,7 @@ npm run lint && npm run typecheck && npm test && npm run build
 
 ## 다음 작업
 
-모형 설계서(REV16)와 코드를 2026-10-28 에 대조한 결과다. 단계가 끝날 때마다 고친다(마지막 2026-11-02, 센서 연결 준비).
+모형 설계서(REV16)와 코드를 2026-10-28 에 대조한 결과다. 단계가 끝날 때마다 고친다(마지막 2026-11-02, 보드 시험 안내).
 
 ### 지금 되는 것
 
@@ -133,7 +133,7 @@ npm run lint && npm run typecheck && npm test && npm run build
 
 | 순서 | 단계 | 내용 |
 |---|---|---|
-| 1 | 보드 시험 | 코드 작업과 병행. ESP32 와 부품을 하나씩 켜 보고 실측값(0 mm 에서의 전압과 흔들림, 설치 높이, 펌프 유량, 릴레이·플로트 레벨)을 적는다. 센서 코드는 `sensor` 브랜치에 두 가지다: `firmware/python/`(MicroPython, 수위 측정과 서버 전송 1단계, 맥에서 pytest 와 실행기로 확인)과 `firmware/board/`(Arduino, 펌프 제어·예측 포함, 맥에서 Arduino API 대역으로 확인). 둘 다 와이파이가 끊기면 10초마다 다시 붙고, 연결 상태와 전송 실패를 시리얼에 찍는다(보드는 전송 성공의 HTTP 코드도 찍는다). 둘 다 아직 보드에서 돌려 보지 않았다. 순서·배선·통과 기준·보드에 올리는 법·서버 연결 확인은 `firmware/README.md` |
+| 1 | 보드 시험 | 코드 작업과 병행. ESP32 와 부품을 하나씩 켜 보고 실측값(0 mm 에서의 전압과 흔들림, 설치 높이, 펌프 유량, 릴레이·플로트 레벨)을 적는다. 센서 코드는 `sensor` 브랜치에 두 가지다: `firmware/python/`(MicroPython, 수위 측정과 서버 전송 1단계, 맥에서 pytest 와 실행기로 확인)과 `firmware/board/`(Arduino, 펌프 제어·예측 포함, 맥에서 Arduino API 대역으로 확인). 둘 다 와이파이가 끊기면 10초마다 다시 붙고, 연결 상태와 전송 실패를 시리얼에 찍는다(보드는 전송 성공의 HTTP 코드도 찍는다). 둘 다 아직 보드에서 돌려 보지 않았다. 순서·배선·통과 기준·보드에 올리는 법·서버 연결 확인과 Windows·macOS 따라하기는 `dev` 의 `firmware/README.md`("보드 시험 따라하기" 절) |
 | 2 | M4 마무리 | 센서 계수(KIT0139 실측 뒤). REV16 한계 수위·바닥 면적은 M5 에서 넣었다. 지금 계수로는 실측 수위가 70 mm 근처를 넘으면 모델 변화율이 ±20 mm/s 에서 포화해 보인다. `/api/ingest` 의 `bootId`·`seq` 되감김 처리. 리뷰 이관분: 포트 `entry`/`batch` 정리, `/api/logs` ndjson 의 `Flaw` 처리, 테스트 대역 정리(`Clip`·`Jam`·`Quota`), 되돌리기 실패 시 원래 오류 보존, 센서 기하 검증(최소 범위 ≤ 설치 높이 − 영점 ≤ 최대 범위, 배율 > 0), 불필요해진 `flush`·`max` 제거. 10-29 리뷰 이관분: `/api/ingest` 상태값(ok·absent·fault) 엄격 검사, `review()` 의 `devices` 설정 검사, 변화율이 NaN 이면 명시적 실패, 메시지 도착 시각 보관(따라잡기 때 한 tick 에 몰리지 않게), 장치 판정의 시각 기준 통일(응답과 state 줄), obs.raw 원본 보존, `Live` 의 포트 Protocol, 테스트 helpers 정리, 두 장치일 때 absent 합집합 |
 | 3 | M5 전 확인 | 2026-10-30 에 정했다. 단계 이름은 계약 `caution`·`warning`·`evacuate`, 화면 이름은 주의·경계·침수(정상은 목록에 안 담음). REV16 `z` 40·70·110 mm 는 구역별 한계(`zones.*.threshold_mm`)이고 모델 수위와 비교한다. 도달 시간은 서버가 모델 변화율로 계산하고(보드의 20초 회귀는 보드에 남김), 60·30초 상한과 10초 유지·90% 해제는 ASSUMED. `/api/state` 에 `zones.*.thresholdMm` 를 더했다. 강우 상한 150 과 프리셋 30·60·90 은 그대로 |
 | 4 | M5 | 끝(10-31 리뷰 수정 반영). 위험 단계 판정, `stage` 이벤트, 기본 알림(기록만). 남은 것: 기본 설정에서는 가정값 개구(3 cm², Cd 0.6)가 150 mm/h 강우보다 훨씬 커 A 는 고이지 않고 B·C 도 한계에 닿지 않아, 경보 시험은 시험용 설정(배수 0, B 한계 6 mm)으로만 한다. 실측 계수를 넣은 뒤 기본 설정으로 다시 확인한다. 관측 보정으로 수위가 뛰면 주의 없이 바로 침수가 될 수 있다(보드의 20초 회귀가 보완). 10-31 리뷰 이관분: 경보 설정의 숫자형 검사(`true` 가 1 mm 로 통과, 문자열은 TypeError), `STAGE_LABELS` 와 `STAGES` 의 한곳 관리, 검증 8 의 `answer()` 중복 정리, 계약 시험의 `thresholdMm` ≤ 0 위반 사례 추가, `dt_s` 0.02 로 늘어난 tick 계산 시간 확인(리뷰 추정 약 2.2 ms 에서 10.4 ms) |
