@@ -1,0 +1,15 @@
+# 공용 모듈(level·ingest·client·node)은 MicroPython 에서도 돌아야 하므로
+# f-string·typing·dataclass 를 쓰지 않는다. main.py 는 보드 전용, host.py 는 맥 전용
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py38"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]
+
+[tool.ruff.lint.isort]
+no-sections = true          # 임포트는 한 묶음, 사이에 빈 줄 없음
