@@ -2,12 +2,14 @@ import node
 import pytest
 
 
-# 가짜 보드: 시각은 sleep 과 read_mv 의 cost 로만 흐르고, 보낸 메시지·로그·잠든 시간을 기록
+# 가짜 보드: 시각은 sleep, read_mv 의 cost, post 의 post_ms 로만 흐르고,
+# 보낸 메시지·로그·잠든 시간을 기록
 class Fake:
-    def __init__(self, mv=480.0, fail=(), cost_ms=0):
+    def __init__(self, mv=480.0, fail=(), cost_ms=0, post_ms=0):
         self.mv = mv
         self.fail = set(fail)
         self.cost_ms = cost_ms
+        self.post_ms = post_ms
         self.t = 0
         self.sent = []
         self.logs = []
@@ -19,6 +21,7 @@ class Fake:
         return self.mv
 
     def post(self, body):
+        self.t += self.post_ms
         if body["seq"] in self.fail:
             raise OSError("끊김")
         self.sent.append(body)
@@ -73,14 +76,13 @@ def test_message_counts_up():
     assert (second["seq"], second["tMs"]) == (1, 1900)
 
 
-# 100 ms 마다 표본, 10 표본마다 전송, 표본마다 keepalive 인지 검사
+# 100 ms 마다 표본, 시작 1 s 뒤부터 1 s 마다 전송, 표본마다 keepalive 인지 검사
 def test_loop_sends_once_a_second():
     board = Fake()
     node.loop(node.Node("b"), board, cycles=2)
-    assert [body["seq"] for body in board.sent] == [0, 1]
-    assert board.sent[1]["tMs"] - board.sent[0]["tMs"] == 1000
-    assert board.fed == 20
-    assert board.sleeps == [100] * 19
+    assert [(body["seq"], body["tMs"]) for body in board.sent] == [(0, 1000), (1, 2000)]
+    assert board.fed == 21
+    assert board.sleeps == [100] * 20
 
 
 # 전송이 실패해도 로그만 남기고 다음 전송을 이어 가는지 검사
@@ -91,9 +93,30 @@ def test_loop_survives_a_failed_post():
     assert len(board.logs) == 1 and "끊김" in board.logs[0]
 
 
-# 표본 읽기가 주기보다 오래 걸리면 몰아서 따라가지 않고 지금부터 다시 세는지 검사
+# 표본 읽기가 주기보다 오래 걸리면 표본은 몰아서 따라가지 않고 전송은 1 s 간격인지 검사
 def test_loop_resyncs_when_behind():
     board = Fake(cost_ms=250)
     node.loop(node.Node("b"), board, cycles=2)
     assert board.sleeps == []
-    assert board.sent[1]["tMs"] - board.sent[0]["tMs"] == 2500
+    assert [body["tMs"] for body in board.sent] == [1000, 2000]
+
+
+# 읽기가 1 s 씩 막혀도(표준입력 줄 읽기) 읽을 때마다 보내는지 검사
+def test_loop_sends_every_read_when_reads_block():
+    board = Fake(cost_ms=1000)
+    node.loop(node.Node("b"), board, cycles=3)
+    assert [body["tMs"] for body in board.sent] == [1000, 2000, 3000]
+
+
+# 전송이 600 ms 걸려도 다음 전송이 1 s 뒤인지 검사
+def test_loop_keeps_the_period_after_a_slow_post():
+    board = Fake(post_ms=600)
+    node.loop(node.Node("b"), board, cycles=3)
+    assert [body["tMs"] for body in board.sent] == [1000, 2000, 3000]
+
+
+# 전송이 주기보다 오래 걸리면 밀린 전송을 몰아 보내지 않고 끝난 때부터 1 s 뒤에 보내는지 검사
+def test_loop_does_not_burst_after_a_long_post():
+    board = Fake(post_ms=2500)
+    node.loop(node.Node("b"), board, cycles=2)
+    assert [body["tMs"] for body in board.sent] == [1000, 4500]

@@ -51,10 +51,13 @@ class WDT:
 
 
 # 가짜 WLAN: connect 가 바로 붙음. error 면 connect 가 그 예외를 내고, stuck 이면 영영 붙지 않음
+# late 는 붙지 않고 넘어가는 처음 connect 횟수, joins 는 connect 횟수
 class WLAN:
     error = None
     stuck = False
+    late = 0
     up = False
+    joins = 0
 
     def __init__(self, mode):
         pass
@@ -66,10 +69,14 @@ class WLAN:
         return WLAN.up
 
     def connect(self, ssid, password):
+        WLAN.joins += 1
         if WLAN.error:
             raise WLAN.error
-        if not WLAN.stuck:
+        if not WLAN.stuck and WLAN.joins > WLAN.late:
             WLAN.up = True
+
+    def disconnect(self):
+        WLAN.up = False
 
     def ifconfig(self):
         return ("192.168.4.2", "255.255.255.0", "192.168.4.1", "8.8.8.8")
@@ -87,7 +94,7 @@ class Clock:
 @pytest.fixture
 def board(monkeypatch):
     Pin.made, WDT.made = [], []
-    WLAN.error, WLAN.stuck, WLAN.up = None, False, False
+    WLAN.error, WLAN.stuck, WLAN.late, WLAN.up, WLAN.joins = None, False, 0, False, 0
     machine = types.ModuleType("machine")
     machine.Pin, machine.ADC, machine.WDT = Pin, ADC, WDT
     network = types.ModuleType("network")
@@ -119,19 +126,50 @@ def test_run_sends_to_the_server_without_touching_the_pump(board):
         ("http://h:1/api/ingest", 2, 560.0),
     ]
     assert (26, "in", None) in Pin.made and (27, "in", "pull_up") in Pin.made
-    assert [(w.timeout, w.fed) for w in WDT.made] == [(8000, 30)]
+    assert [(w.timeout, w.fed) for w in WDT.made] == [(8000, 31)]
 
 
-# 와이파이가 제한 시간 안에 붙지 않거나 드라이버가 OSError 를 내면, 감시 타이머 없이 REPL 출력으로
-# 넘어가는지 검사
+# 부팅 때 와이파이가 제한 시간 안에 붙지 않거나 드라이버가 OSError 를 내도, 서버 주소와 감시
+# 타이머를 두고 보낼 때마다 끊김을 알리는지 검사
 @pytest.mark.parametrize("error", [None, OSError("Wifi Invalid Password")])
-def test_run_falls_back_to_printing_when_wifi_fails(board, capsys, error):
+def test_run_keeps_the_server_when_wifi_fails_at_boot(board, capsys, error):
     WLAN.error, WLAN.stuck = error, error is None
-    board.main.run(cycles=1)
+    board.main.run(cycles=2)
     out = capsys.readouterr().out.splitlines()
-    assert board.sent == [] and WDT.made == []
+    assert board.sent == [] and [w.timeout for w in WDT.made] == [8000]
     assert "wifi" in out[0]
-    assert json.loads(out[-1])["seq"] == 0
+    assert "전송 실패 seq 1: 와이파이 끊김" in out
+
+
+# 부팅 때 못 붙었어도 보낼 때 다시 붙어 그다음 전송부터 서버로 보내고, 붙은 IP 를 찍는지 검사
+def test_run_rejoins_after_a_failed_boot(board, capsys):
+    WLAN.late = 1
+    board.main.run(cycles=3)
+    out = capsys.readouterr().out.splitlines()
+    assert [body["seq"] for _, body in board.sent] == [1, 2]
+    assert "전송 실패 seq 0: 와이파이 끊김" in out and "wifi 192.168.4.2" in out
+
+
+# 도는 중에 와이파이가 끊기면 그 전송은 실패로 알리고, 다시 붙은 뒤 IP 를 찍고 이어 보내는지 검사
+def test_run_rejoins_after_a_drop(board, capsys, monkeypatch):
+    def once(url, body, timeout_s):
+        board.sent.append((url, body))
+        if body["seq"] == 0:
+            WLAN.up = False  # 첫 전송 뒤 끊김
+
+    monkeypatch.setattr(board.main.client, "send", once)
+    board.main.run(cycles=3)
+    out = capsys.readouterr().out.splitlines()
+    assert [body["seq"] for _, body in board.sent] == [0, 2]
+    assert "전송 실패 seq 1: 와이파이 끊김" in out
+    assert out.count("wifi 192.168.4.2") == 2
+
+
+# 계속 못 붙으면 다시 붙기를 10초에 한 번만 시도하는지 검사
+def test_rejoin_waits_ten_seconds_between_tries(board):
+    WLAN.stuck = True
+    board.main.run(cycles=12)
+    assert WLAN.joins == 3  # 부팅 때 1번, 16초와 26초의 전송 때 1번씩
 
 
 # SERVER_URL 에 http:// 가 없으면 부팅 때 알리고 서버 없이 도는지 검사

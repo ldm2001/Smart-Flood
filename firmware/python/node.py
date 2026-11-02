@@ -37,11 +37,11 @@ class Node:
         return body
 
 
-# 100 ms 마다 표본, 1 s 마다 전송. 전송 실패는 log 로 알리고 계속. cycles 는 전송 시도 횟수 제한
+# 100 ms 마다 표본, 시작 1 s 뒤부터 1 s 마다 전송. 두 주기는 따로 세어 읽기나 전송이 느려도
+# 전송 간격은 1 s. 전송 실패는 log 로 알리고 계속. cycles 는 전송 시도 횟수 제한
 def loop(node, board, cycles=None, sample_ms=SAMPLE_MS, send_ms=SEND_MS):
-    per_send = send_ms // sample_ms
     due = board.now_ms()
-    count = 0
+    send_due = board.add(due, send_ms)
     sent = 0
     while cycles is None or sent < cycles:
         now = board.now_ms()
@@ -52,13 +52,17 @@ def loop(node, board, cycles=None, sample_ms=SAMPLE_MS, send_ms=SEND_MS):
         if -wait > sample_ms:  # 많이 늦었으면 몰아서 따라가지 않고 지금부터 다시 셈
             due = now
         node.sample(board.read_mv())
-        count += 1
-        if count % per_send == 0:
-            body = node.message(board.now_ms())
+        now = board.now_ms()
+        if board.diff(now, send_due) >= 0:
+            body = node.message(now)
             try:
                 board.post(body)
             except Exception as error:
                 board.log("전송 실패 seq {}: {}".format(body["seq"], error))
             sent += 1
+            send_due = board.add(send_due, send_ms)
+            now = board.now_ms()
+            if board.diff(now, send_due) > 0:  # 전송이 주기를 넘겼으면 밀린 전송을 몰아 보내지 않음
+                send_due = board.add(now, send_ms)
         board.keepalive()
         due = board.add(due, sample_ms)
