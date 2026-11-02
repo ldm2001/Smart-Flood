@@ -38,7 +38,7 @@ REV15 부품(푸시 버튼 GPIO25, JSN-SR04T GPIO5·18, HX711 GPIO32·33)은 REV
 |---|---|---|
 | `AP_PASS` | 보드가 여는 와이파이 `SMART_FLOOD` 의 암호. 8자 이상 | 관제 화면과 펌프 제어를 열지 않는다(암호 없는 AP 로 펌프를 제어하지 않기 위해) |
 | `STA_SSID`·`STA_PASS` | 서버가 있는 와이파이 | 와이파이에 붙지 않는다 |
-| `SERVER_URL` | `http://<노트북 IP>:8000`. 끝에 `/` 없이 | 서버로 보내지 않는다 |
+| `SERVER_URL` | `http://<노트북 IP>:8000`. 컴퓨터 이름 말고 IP 로 적는다. 끝의 `/` 는 있어도 된다 | 서버로 보내지 않는다 |
 | `NTFY_TOPIC` | 휴대폰 푸시용 ntfy 주제 | 푸시를 보내지 않는다 |
 
 관제 화면은 휴대폰을 `SMART_FLOOD` 에 붙이고 시리얼에 찍힌 주소(보통 `http://192.168.4.1`)를 열면 나온다. 화면이 쓰는 경로는 다음과 같다.
@@ -57,11 +57,25 @@ REV15 부품(푸시 버튼 GPIO25, JSN-SR04T GPIO5·18, HX711 GPIO32·33)은 REV
 
 서버에는 1초마다 `POST /api/ingest` 로 `distA_mm = 600 - 수위` 를 보낸다. 600 은 `INSTALL_HEIGHT_MM` 이고 `backend/config.yaml` 의 `sensors.A.install_height_mm` 와 같아야 한다. B 구역과 무게는 `null`·`absent`, 센서 이상이면 `distA_mm` 가 `null` 이고 `A` 가 `fault` 다. 서버가 꺼져 있어도 연결·읽기 제한이 각 400 ms 라 펌프 제어 루프가 오래 막히지 않는다. ntfy 는 TLS 인증서를 확인하지 않고(`setInsecure`) 보낸다.
 
+와이파이가 끊기면 10초는 ESP32 코어의 자동 재접속에 맡기고, 그 뒤로는 10초(`REJOIN_MS`)마다 다시 붙어 본다. 부팅 때 공유기를 못 찾은 경우도 같다. 붙지 않은 동안에는 서버 전송과 ntfy 만 건너뛰고 수위 측정·펌프 제어·알림 판단은 그대로 돈다.
+
+와이파이와 서버 전송 상태는 바뀔 때만 시리얼에 한 줄 찍는다. 와이파이 이름과 암호는 찍지 않는다.
+
+| 시리얼 줄 | 뜻 | 할 일 |
+|---|---|---|
+| `와이파이 연결: <IP>` | 공유기에 붙었다 | 노트북과 같은 망인지 본다("서버에 닿게 하기") |
+| `와이파이 연결 안 됨. 10초마다 다시 붙어 봄` | 공유기에 붙지 못했다. 부팅 직후에는 붙는 중이라 한 번 보일 수 있다 | 계속 보이면 `STA_SSID`·`STA_PASS` 와 2.4 GHz 망인지 확인한다 |
+| `서버 전송 HTTP 200` | 서버가 받았다 | 서버가 live 가 아니면 받기만 하고 쓰지 않는다. "서버에 닿게 하기" 대로 live 로 바꾼다 |
+| `서버 전송 HTTP 422` | 서버가 메시지를 거절했다. 보통 모르는 장치 이름이다 | `DEVICE_ID` 가 `backend/config.yaml` 의 `devices.allowed` 에 있는지 본다 |
+| `서버 전송 HTTP 404`·`405` | 경로가 틀렸다 | `SERVER_URL` 은 `http://IP:8000` 까지만 적는다. `/api/ingest` 는 보드가 붙인다 |
+| `서버 전송 실패: connection refused` 등 | 서버에 닿지 못했다 | 서버를 `--host 0.0.0.0` 으로 띄웠는지, macOS 방화벽, 같은 와이파이인지 본다 |
+| `서버 주소를 읽지 못함` | `SERVER_URL` 을 읽지 못했다 | `http://IP:8000` 꼴로 고친다 |
+
 알려진 특성: 강우 흉내가 ON·OFF 펄스라 20초 회귀 기울기가 출렁이고, 그래서 ETA 가 흔들리며 첫 알림이 명목 60초보다 이르게 올 수 있다. 수위가 최대 수위 근처일 때 C 구역에도 "주의"가 잠깐 뜰 수 있다(C 는 침수하지 않는다). 설계서 10장의 화면 스크립트에서 PDF 에 잘린 줄과 `cfg.z2` 오류는 `page.h` 머리에 적은 대로 고쳤다.
 
 ### 확인한 것
 
-맥에서 WiFi·HTTPClient·WebServer·Preferences·ADC 의 대역을 만들어 `board.ino` 를 C++ 로 컴파일하고, `setup()`·`loop()` 를 가짜 시계(100 ms)와 가짜 수위로 돌렸다. 통과한 것: 부팅 직후 릴레이 꺼짐(고임피던스), `secrets.h` 가 없으면 와이파이·관제 화면·전송 없음, 1초마다 전송과 `seq` 증가, 전송 본문 1101건이 서버의 `Message` 스키마와 live 모드 `/api/ingest` 를 통과, 강우 회차에서 A·B 순서 침수와 경보 선행 약 100초, 최대 수위 정지, 플로트 100 ms 정지, 센서 이상 정지와 `null` 전송, 수동 60초 정지, 설정 저장·재로드, 두 점 보정. 대역은 직접 만든 것이라 ESP32 코어 API 의 이름과 시그니처는 확인되지 않았다. 보드에서 처음 컴파일할 때 오류가 날 수 있다.
+맥에서 WiFi·HTTPClient·WebServer·Preferences·ADC 의 대역을 만들어 `board.ino` 를 C++ 로 컴파일하고, `setup()`·`loop()` 를 가짜 시계(100 ms)와 가짜 수위로 돌렸다. 통과한 것: 부팅 직후 릴레이 꺼짐(고임피던스), `secrets.h` 가 없으면 와이파이·관제 화면·전송 없음, 1초마다 전송과 `seq` 증가, `SERVER_URL` 끝의 `/` 를 빼고 `/api/ingest` 를 붙인 주소, 와이파이가 25초 끊기면 전송을 멈추고 10초마다 다시 붙어 본 뒤 이어 보냄, 와이파이·전송 상태(연결·끊김·실패·422·200·주소 오류)를 바뀔 때 한 번씩 찍고 와이파이 이름·암호는 찍지 않음, 전송 본문 1108건이 서버의 `Message` 스키마와 live 모드 `/api/ingest` 를 통과, 강우 회차에서 A·B 순서 침수와 경보 선행 약 100초, 최대 수위 정지, 플로트 100 ms 정지, 센서 이상 정지와 `null` 전송, 수동 60초 정지, 설정 저장·재로드, 두 점 보정. 대역은 직접 만든 것이라 ESP32 코어 API 의 이름과 시그니처는 확인되지 않았다. 보드에서 처음 컴파일할 때 오류가 날 수 있다.
 
 ## python 노드(MicroPython)
 
@@ -118,11 +132,15 @@ mpremote connect /dev/cu.usbserial-XXXX reset
 mpremote connect /dev/cu.usbserial-XXXX repl    # 전송 실패가 있으면 여기 찍힌다. Ctrl-] 로 나감
 ```
 
-`secret.py` 가 없거나 `SERVER_URL`·`STA_SSID` 가 비면 와이파이에 붙지 않고 메시지를 REPL 에만 찍는다. `secret.py` 가 깨져 있거나(문법 오류), `SERVER_URL` 이 `http://` 로 시작하지 않거나, 와이파이에 붙지 못해도 멈추지 않고 이유를 한 줄 찍은 뒤 같은 REPL 출력으로 넘어간다. `SERVER_URL` 끝의 `/` 는 있어도 된다. 보드를 남에게 넘길 때는 `mpremote rm :secret.py` 로 지운다.
+`secret.py` 가 없거나 `SERVER_URL`·`STA_SSID` 가 비면 와이파이에 붙지 않고 메시지를 REPL 에만 찍는다. `secret.py` 가 깨져 있거나(문법 오류) `SERVER_URL` 이 `http://` 로 시작하지 않아도 멈추지 않고 이유를 한 줄 찍은 뒤 같은 REPL 출력으로 넘어간다. `SERVER_URL` 끝의 `/` 는 있어도 된다. 보드를 남에게 넘길 때는 `mpremote rm :secret.py` 로 지운다.
+
+부팅 때 15초 안에 와이파이에 붙지 못하면 `wifi 접속 실패. 보낼 때마다 다시 붙어 봄` 을 찍고 서버 주소는 그대로 둔다. 붙지 않은 동안에는 전송마다 `전송 실패 seq N: 와이파이 끊김` 을 찍고 10초에 한 번 다시 붙어 본다. 도는 중에 끊긴 경우도 같다. 다시 붙으면 `wifi <IP>` 를 찍고 이어 보낸다. 잘 보내는 동안에는 아무것도 찍지 않으므로 `wifi <IP>` 뒤에 `전송 실패` 줄이 없으면 보내고 있는 것이다. `서버 응답 422` 는 `ingest.py` 의 `DEVICE_ID` 가 서버의 `devices.allowed` 에 없다는 뜻이고, `서버 응답 404`·`405` 는 `SERVER_URL` 에 경로를 붙였다는 뜻이다. 그 밖의 `전송 실패`(시간 초과·연결 거절 등)는 서버에 닿지 못한 것이니 "서버에 닿게 하기" 를 본다.
+
+서버로 보내도록 설정되어 있으면(`SERVER_URL`·`STA_SSID`) 감시 타이머 8초가 켜지고 끌 수 없다. REPL 에서 Ctrl-C 로 루프를 멈추면 8초 뒤 보드가 다시 부팅한다. REPL 에서 오래 작업하려면 `SERVER_URL` 을 비운 `secret.py` 를 올리고 다시 부팅한다. 코드를 다시 올리다 재부팅되면 같은 명령을 다시 한다.
 
 ### 확인한 것
 
-맥에서 pytest 47건(변환·보정·메시지·HTTP 클라이언트·루프 타이밍·실행기·보드 층)과 ruff 가 통과했다. 보드 층 `main.py` 는 `tests/test_main.py` 가 `machine`·`network`·`time.ticks_*` 대역을 끼워 CPython 에서 돌린다: 릴레이 핀이 입력으로 설정되고 핀 출력이 없으며, `seq` 0·1·2 가 `/api/ingest` 로 가고, 감시 타이머가 표본마다 먹여지며, 와이파이 실패·깨진 `secret.py`·잘못된 `SERVER_URL` 에서는 REPL 출력으로 넘어간다. `host.py` 로 로컬 서버(live)에 4초 보내 `/api/state` 의 `devices.esp32_1` 이 online, A 구역 `levelMm` 40.0·`source` measured 가 되는 것을 확인했다. MicroPython 실제 API(`ADC.read_uv`, `WDT`, `network.WLAN`)는 보드에서 아직 돌려 보지 않았다.
+맥에서 pytest 53건(변환·보정·메시지·HTTP 클라이언트·루프 타이밍·실행기·보드 층)과 ruff 가 통과했다. 루프는 표본 읽기가 1초씩 막히거나(표준입력) 전송이 600 ms 걸려도 1초 간격으로 보내고, 전송이 1초를 넘기면 밀린 전송을 몰아 보내지 않는다. 보드 층 `main.py` 는 `tests/test_main.py` 가 `machine`·`network`·`time.ticks_*` 대역을 끼워 CPython 에서 돌린다: 릴레이 핀이 입력으로 설정되고 핀 출력이 없으며, `seq` 0·1·2 가 `/api/ingest` 로 가고, 감시 타이머가 표본마다 먹여지며, 부팅 때나 도는 중에 와이파이가 끊기면 그 전송을 실패로 알리고 10초에 한 번만 다시 붙어 본 뒤 붙으면 IP 를 찍고 이어 보내며, 깨진 `secret.py`·잘못된 `SERVER_URL` 에서는 REPL 출력으로 넘어간다. `host.py` 로 로컬 서버(live)에 가짜 수위를 10초, 표준입력 mV 를 1초에 한 줄씩 보내 두 경우 모두 `tMs` 간격이 991~1011 ms 이고, 보내는 동안 `/api/state` 의 `devices.esp32_1` 이 online, A 구역 `source` 가 measured 인 것을 확인했다. MicroPython 실제 API(`ADC.read_uv`, `WDT`, `network.WLAN`)는 보드에서 아직 돌려 보지 않았다.
 
 ## 순서
 
@@ -137,7 +155,7 @@ mpremote connect /dev/cu.usbserial-XXXX repl    # 전송 실패가 있으면 여
 | 5 | 릴레이 + 펌프 | `parts/relay` | 어댑터 + 를 COM, NO 를 펌프 +, 펌프 - 를 어댑터 - | 펌프를 물에 넣은 뒤에만 어댑터를 꽂는다(수중펌프는 공회전 금지). 3초 켜짐·꺼짐이 반복된다. 1분간 받은 물 양으로 L/min 을 적는다 |
 | 6 | KIT0139 | `parts/depth` | 변환보드 출력을 GPIO34 에 | 물이 없을 때 mV 와 1분 동안의 흔들림(mV)을 적는다. 1 mV 가 약 2.6 mm 라 ±3 mV 면 수위 ±8 mm 다. 깊이 두 점에서 mV 를 적는다 |
 | 7 | board(서버 없이) | `board` | 전부. `secrets.h` 에 `AP_PASS` 만 | 관제 화면에 수위가 보인다. `cal1`·`cal2` 보정 뒤 자 눈금과 ±5 mm 안에 든다. `start` 로 강우 회차를 돌리면 물이 A 기준(40 mm)에 닿기 전에 주의·경계가 뜨고, 플로트를 들면 바로 멈춘다 |
-| 8 | board + 서버 | `board` | 전부. `STA_SSID`·`STA_PASS`·`SERVER_URL` 채움 | 서버를 live 로 바꾸고 회차를 시작하면 `/api/state` 의 `devices.esp32_1` 이 online 이고 A 수위가 보드 값과 같다 |
+| 8 | board + 서버 | `board` | 전부. `STA_SSID`·`STA_PASS`·`SERVER_URL` 채움 | 시리얼에 `와이파이 연결: <IP>` 와 `서버 전송 HTTP 200` 이 찍힌다. 서버를 live 로 바꾸고 회차를 시작하면 `/api/state` 의 `devices.esp32_1` 이 online 이고 A 수위가 보드 값과 같다 |
 
 시험 3·4 의 결과가 기본값과 다르면 `board.ino` 위쪽의 `FLOAT_LOW_WHEN_CLOSED`·`RELAY_ACTIVE_LOW` 를 바꾼 뒤 올린다.
 
@@ -150,6 +168,8 @@ cd backend
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
+노트북에서 `curl -s http://<노트북 IP>:8000/api/state` 가 JSON 을 돌려주면 서버가 바깥 주소에서도 듣고 있다. 보드 시리얼의 `와이파이 연결: <IP>` 와 노트북 IP 는 보통 앞 세 자리가 같다.
+
 서버는 기본이 시뮬레이션이다. 보드 값을 쓰려면 멈춘 상태에서 live 로 바꾸고 회차를 시작한다.
 
 ```bash
@@ -157,7 +177,7 @@ curl -X POST http://localhost:8000/api/source -H 'Content-Type: application/json
 curl -X POST http://localhost:8000/api/experiment/start -H 'Content-Type: application/json' -d '{}'
 ```
 
-macOS 방화벽이 켜져 있으면 python 의 수신 연결을 허용한다. ESP32 와 노트북이 같은 WiFi 에 있어야 한다.
+macOS 방화벽이 켜져 있으면 python 의 수신 연결을 허용한다. ESP32 와 노트북이 같은 WiFi 에 있어야 한다. 학교·회사 와이파이는 기기끼리의 연결을 막기도 하니, 그럴 때는 휴대폰 핫스팟에 둘 다 붙인다. ESP32 는 2.4 GHz 만 잡으므로 아이폰 핫스팟은 "호환성 최대화" 를 켠다.
 
 ## 적어 둘 값
 
