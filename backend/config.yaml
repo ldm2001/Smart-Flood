@@ -3,15 +3,16 @@
 # 실측·보정 후 값만 교체한다. 단위는 키 이름의 접미사(_m, _m2, _s, _mm, _g)를 따른다.
 
 model_version: "0.1-assumed"
-dt_s: 0.1                    # ASSUMED 내부 적분 간격
+# 0.1 은 REV16 저류 면적에서 월류 과도가 빨라 1 mm 수렴 못 함
+dt_s: 0.02                   # ASSUMED 내부 적분 간격
 tick_hz: 1
-model_area_m2: 0.48          # ASSUMED 모형 전체 면적
+model_area_m2: 0.17          # ASSUMED 모형 전체 면적(REV16 바닥 0.17 m², 실측 전)
 rain_presets_mm_per_h: {light: 30, medium: 60, heavy: 90}   # ASSUMED, 최대 150
 rain_max_mm_per_h: 150       # ASSUMED 직접 입력 상한 (지시서 3.2 "최대 150")
-zones:                       # ASSUMED 저장 면적·바닥 높이·강우 배분·임계값
-  A: {S_m2: 0.10, z_m: 0.000, share: 0.40, threshold_mm: 45}
-  B: {S_m2: 0.10, z_m: 0.020, share: 0.35, threshold_mm: 55}
-  C: {S_m2: 0.08, z_m: 0.060, share: 0.25, threshold_mm: 65}
+zones:                       # ASSUMED 저장 면적·바닥 높이·강우 배분·한계 수위(REV16 z 40·70·110 mm)
+  A: {S_m2: 0.035, z_m: 0.000, share: 0.40, threshold_mm: 40}
+  B: {S_m2: 0.035, z_m: 0.020, share: 0.35, threshold_mm: 70}
+  C: {S_m2: 0.028, z_m: 0.060, share: 0.25, threshold_mm: 110}
 links:                       # ASSUMED 월류 경계 높이·계수 (방향은 수면 높이로 정한다)
   - {from: C, to: B, sill_m: 0.065, k: 0.55}
   - {from: B, to: A, sill_m: 0.025, k: 0.55}
@@ -22,7 +23,8 @@ inlets:                      # ASSUMED 빗물받이 개구 면적·유량 계수
 blockage_open_ratio: {none: 1.0, partial: 0.45, full: 0.08}   # ASSUMED
 correction: {gain: 0.3, max_age_s: 3.0, invalid_after_s: 10.0}   # ASSUMED
 prediction: {horizons_s: [10, 20, 30], valid_for_s: 5}
-alerts: {release_ratio: 0.9, release_hold_s: 10}
+# 주의·경계 도달 예상 상한(초), 침수 해제 비율, 내림 유지 시간(초)
+alerts: {caution_eta_s: 60, warning_eta_s: 30, release_ratio: 0.9, release_hold_s: 10}   # ASSUMED
 devices: {allowed: [esp32_1, esp32_2], offline_after_s: 5}
 sensors:                     # ASSUMED 설치 높이·영점·배율·측정 범위(min_range_mm = 데드존, 입고 사양 확인 전)
   # max_range_mm 은 센서 사양이 아니라 모형 치수 한계다: 설치 높이 600 + 여유 50

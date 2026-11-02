@@ -8,7 +8,7 @@ LIMIT_M = 0.001  # 허용 수위 차이(m)
 
 # 두 간격으로 돌려 구역별 수위 차이의 최댓값을 구하는 함수
 def spread(params, start_for):
-    coarse_p, fine_p = replace(params, dt_s=0.1), replace(params, dt_s=0.05)
+    coarse_p, fine_p = params, replace(params, dt_s=params.dt_s / 2)  # 설정 dt 와 그 절반
     coarse = trace(coarse_p, EXPERIMENT, EXPERIMENT_S, start_for(coarse_p))
     fine = trace(fine_p, EXPERIMENT, EXPERIMENT_S, start_for(fine_p))
     return {  # 구역 이름 → 최대 차이를 반환

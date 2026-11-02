@@ -1,10 +1,16 @@
 import pytest
 from app.core.model import Conditions, baseline, evolution
 from app.core.predictor import forecast
-from tests.scenarios import flood
+from tests.scenarios import flood, stress
 
 RAINS_MM_PER_H = (30.0, 60.0, 90.0, 150.0)  # 시험할 강우 세기(mm/h)
 A_INLET_SETS = (("INLET-01",), ("INLET-02",), ("INLET-01", "INLET-02"))
+
+
+@pytest.fixture(scope="module")
+# 1/20 개구 계수. 설정 개구 3 cm² 는 REV16 강우보다 훨씬 커 A 수위가 한 걸음치 강우(µm) 잡음에 머묾
+def params(config):
+    return stress(config)
 
 
 # 시작 상태를 종류별로 만드는 함수

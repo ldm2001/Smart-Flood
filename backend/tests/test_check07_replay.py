@@ -1,6 +1,6 @@
 import json
 import pytest
-from tests.helpers import digests, footage, lapse
+from tests.helpers import Mailbox, digests, footage, lapse
 
 ID = "EXP-20261022-001"
 SOURCE_URL = "/api/source"
@@ -23,17 +23,6 @@ CHANGES = (
     ("/api/blockage", {"type": "partial", "location": "INLET-03"}, BLOCKAGE_REFUSED),
     ("/api/blockage", {"type": "none"}, BLOCKAGE_REFUSED),
 )
-
-
-# 받은 알림을 모아 두기만 하는 가짜 알림기
-class Mailbox:
-    # 만들 때
-    def __init__(self) -> None:
-        self.events: list[dict] = []
-
-    # 알림을 받는 자리
-    def notice(self, event: dict) -> None:
-        self.events.append(event)
 
 
 @pytest.fixture

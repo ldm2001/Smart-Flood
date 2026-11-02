@@ -5,6 +5,17 @@ import { demo } from "./mock";
 const T0 = Date.UTC(2026, 9, 25, 1, 0, 0);  // 기준 시각(2026-10-25 01:00 UTC)
 const BODY = demo(T0, { A: 45, B: 55, C: 65 });  // 계약을 통과하는 응답 본문
 const CONFIG = { zones: { A: { threshold_mm: 45 }, B: { threshold_mm: 55 }, C: { threshold_mm: 65 } } };
+const EVENT = {  // 단계 전환 사건 한 줄
+  type: "event",
+  kind: "stage",
+  elapsedSec: 25,
+  time: "2026-10-22T09:00:25.000000+09:00",
+  message: "B 구역 주의 (이전 정상, 한계까지 60 초)",
+  zone: "B",
+  stage: "caution",
+  previous: "safe",
+  etaSec: 60,
+};
 
 // API_BASE 는 모듈을 읽을 때 정해져(빌드 값) 테스트마다 새로 읽음
 async function instance(base?: string) {
@@ -106,6 +117,40 @@ describe("api", () => {
     expect(signal(slow)?.aborted).toBe(false);
     vi.advanceTimersByTime(1);  // 1밀리초 더 보냄(합계 5초)
     expect(signal(slow)?.aborted).toBe(true);
+    expect(await pending).toBeInstanceOf(Error);
+  });
+
+  it("reads the events of a record, wrapping the id in the path", async () => {
+    const fetch = server({ events: [EVENT] });
+    const { logbook } = await instance(undefined);
+    await expect(logbook("EXP-20261101-001")).resolves.toEqual([EVENT]);
+    expect(fetch.mock.calls[0][0]).toBe("/api/logs/EXP-20261101-001/events");
+    await logbook("a/b c");
+    expect(fetch.mock.calls[1][0]).toBe("/api/logs/a%2Fb%20c/events");  // 주소 글자로 감쌈
+  });
+
+  it("treats a missing record as an empty list", async () => {
+    server({ detail: "Not Found" }, 404);
+    const { logbook } = await instance(undefined);
+    await expect(logbook("EXP-20261101-009")).resolves.toEqual([]);
+  });
+
+  it("throws other failures and contract breaks from the events read", async () => {
+    server({ detail: "log read failed" }, 500);
+    const { logbook, Failure } = await instance(undefined);
+    await expect(logbook("EXP-20261101-001")).rejects.toBeInstanceOf(Failure);
+    server({ events: [{ ...EVENT, kind: "pump" }] });
+    await expect(logbook("EXP-20261101-001")).rejects.toThrow(ZodError);
+  });
+
+  it("gives up on the events read after 5 s", async () => {
+    const fetch = silence();
+    const { logbook } = await instance(undefined);
+    const pending = logbook("EXP-20261101-001").catch((e: unknown) => e);
+    vi.advanceTimersByTime(4999);
+    expect(signal(fetch)?.aborted).toBe(false);
+    vi.advanceTimersByTime(1);  // 1밀리초 더 보냄(합계 5초)
+    expect(signal(fetch)?.aborted).toBe(true);
     expect(await pending).toBeInstanceOf(Error);
   });
 });

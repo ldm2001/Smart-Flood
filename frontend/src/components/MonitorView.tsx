@@ -5,17 +5,23 @@ import {
   clock,
   expiry,
   roster,
+  scope,
   ZONE_IDS,
   type Sample,
   type Thresholds,
 } from "@/lib/derive";
 import { RUN_STATE_ICONS, RUN_STATE_LABELS } from "@/lib/layout-data";
-import { trail, demo } from "@/lib/mock";
+import { trail, demo, diary } from "@/lib/mock";
 import type { Snapshot } from "@/lib/schema";
+import { useEvents, type Events } from "@/lib/useEvents";
 import { useNow } from "@/lib/useNow";
 import { useSettings } from "@/lib/useSettings";
 import { useSnapshot, type Feed } from "@/lib/useSnapshot";
+import { Timeline } from "./AlertTimeline";
+import { Plan } from "./CityPlan";
 import { Signal } from "./ConnectionBadge";
+import { Devices } from "./DeviceStatus";
+import { Journal } from "./EventLog";
 import { Chart } from "./LevelChart";
 import { Mode } from "./ModeBadge";
 import { Headline } from "./StatusBanner";
@@ -57,23 +63,35 @@ export function scene(now: number | null, polled: Feed, mockThresholds: Readonly
   };
 }
 
-// 관제 화면. 서버 상태를 읽어 Panel 에 넘김
+// 관제 화면. 서버 상태와 사건을 읽어 Panel 에 넘김
 export function Monitor() {
   const now = useNow();
   const polled = useSnapshot();
   const { thresholds } = useSettings();  // 가짜 화면용 한계 수위를 설정에서 읽음
-  return <Panel {...scene(now, polled, thresholds)} />;
+  const events = useEvents(polled.latest?.snapshot ?? null);  // 서버 상태가 있을 때만 사건을 읽음
+  return <Panel {...scene(now, polled, thresholds)} events={events} />;
 }
 
-// 장면을 받아 화면을 그리는 컴포넌트
-export function Panel(props: Scene) {
+// 장면을 받아 화면을 그리는 컴포넌트. 사건은 Monitor 가 넘김
+export function Panel(props: Scene & { events?: Events }) {
   const data = props.view === "connecting" ? null : props;
   const snapshot = data?.snapshot ?? null;
-  const statuses = snapshot ? roster(snapshot.alerts) : null;  // 서버 alerts 로 구역별 단계를 구
+  const statuses = snapshot ? roster(snapshot.alerts) : null;  // 서버 alerts 로 구역별 단계를 구함
   const banner = snapshot && statuses ? caption(statuses, snapshot.zones) : null;
   const meta = snapshot?.predictionMeta;  // 예측 기준 정보(기준 시각·유효 초)
   const expired = data !== null && meta ? expiry(data.now, Date.parse(meta.basisTime), meta.validForSec) : false;
   const runState = snapshot?.runState;
+  const events =  // mock 은 가짜 사건, server 는 읽은 사건
+    data === null
+      ? null
+      : data.view === "mock"
+        ? data.thresholds
+          ? { list: diary(data.now, data.thresholds), failed: false }
+          : null
+        : (props.events ?? null);
+  const log = events && snapshot  // 재생 중이면 지금 경과 초까지만
+    ? { failed: events.failed, list: events.list && scope(events.list, snapshot) }
+    : null;
 
   return (
     <main className="mx-auto w-full max-w-[1800px] px-4 py-6 md:px-8 md:py-8">
@@ -134,6 +152,14 @@ export function Panel(props: Scene) {
         predictions={snapshot?.predictions ?? null}
         thresholds={data?.thresholds ?? null}
       />
+      <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <Plan snapshot={snapshot} statuses={statuses} thresholds={data?.thresholds ?? null} />
+        <Devices snapshot={snapshot} />
+      </div>
+      <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <Timeline log={log} />
+        <Journal log={log} />
+      </div>
     </main>
   );
 }

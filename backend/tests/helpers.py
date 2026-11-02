@@ -1,5 +1,6 @@
 import errno
 import hashlib
+import io
 import json
 import math
 from app.core.calibration import Sensor, gap
@@ -57,6 +58,17 @@ class Script:
                 "sensorStatus": dict(self.status),  # 센서 상태 복사본(매번 같음)
             }
         ]
+
+
+# 알림 Notifier 의 가짜. 받은 사건을 모아 두기만 함
+class Mailbox:
+    # 만들 때 빈 목록
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    # 사건 하나를 받아 둠
+    def notice(self, event: dict) -> None:
+        self.events.append(event)
 
 
 # 기록 파일에서 state 레코드의 상태만 순서대로 모으는 함수
@@ -133,5 +145,61 @@ def breakage(monkeypatch) -> None:
     def surrogate(self, mode="r", *args, **kwargs):
         handle = origin(self, mode, *args, **kwargs)  # 먼저 진짜로 엶
         return Clip(handle) if "a" in mode else handle
+
+    monkeypatch.setattr(Path, "open", surrogate)
+
+
+# 남은 자리(room 바이트)까지만 디스크에 쓰고 그 뒤는 가득 찼다고 알리는 날 파일 대역. 버퍼 아래에 둠
+class Jam(io.RawIOBase):
+    # 진짜 날 파일(FileIO)과 남은 자리를 받음
+    def __init__(self, inner, room: int) -> None:
+        super().__init__()
+        self.inner, self.room = inner, room
+
+    # 쓸 수 있는 파일임
+    def writable(self) -> bool:
+        return True
+
+    # 위치를 옮길 수 있는 파일임
+    def seekable(self) -> bool:
+        return True
+
+    # 남은 자리 안이면 다 쓰고, 넘치면 남은 자리만큼만 쓴 뒤 오류
+    def write(self, data) -> int:
+        chunk = bytes(data)
+        if len(chunk) <= self.room:
+            self.room -= len(chunk)
+            return self.inner.write(chunk)
+        self.inner.write(chunk[: self.room])
+        self.room = 0
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    # 지금 위치는 속 파일의 것
+    def tell(self) -> int:
+        return self.inner.tell()
+
+    # 위치 옮기기는 속 파일에 넘김
+    def seek(self, offset: int, whence: int = 0) -> int:
+        return self.inner.seek(offset, whence)
+
+    # 자르기는 속 파일에 넘김
+    def truncate(self, size=None) -> int:
+        return self.inner.truncate(size)
+
+    # 속 파일도 함께 닫음
+    def close(self) -> None:
+        self.inner.close()
+        super().close()
+
+
+# 이어쓰기로 여는 파일을 Jam 위의 진짜 BufferedWriter 로 교체. 디스크에 room 바이트만 남은 상황
+def shortage(monkeypatch, room: int) -> None:
+    origin = Path.open
+
+    # 이어쓰기면 자리가 모자란 날 파일 위에 버퍼를 얹어 주는 열기 함수
+    def surrogate(self, mode="r", *args, **kwargs):
+        if "a" not in mode:
+            return origin(self, mode, *args, **kwargs)
+        return io.BufferedWriter(Jam(io.FileIO(str(self), mode), room))
 
     monkeypatch.setattr(Path, "open", surrogate)

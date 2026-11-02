@@ -15,6 +15,7 @@ CONTRACT_HORIZONS_S = (10, 20, 30)  # predictions 의 키: 10·20·30 초
 M_TO_MM = 1000.0  # m → mm 변환 계수(단위 변환은 여기서만)
 M3_TO_L = 1000.0  # m³ → L 변환 계수
 M3S_TO_L_PER_MIN = 60_000.0  # m³/s → L/min 변환 계수
+RATE_LIMIT_MM_S = 20.0  # 변화율(mm/s) 계약 범위 ±20. 넘는 모델 값은 응답에서 포화
 KST_OFFSET = timedelta(hours=9)  # 한국 표준시 +09:00
 
 
@@ -34,6 +35,11 @@ def number(**bounds: float):
     return Annotated[float, Field(strict=True, **bounds)]  # 엄격 모드에 범위(ge·le·gt)를 붙임
 
 
+# 변화율 m/s → mm/s. 계약 범위 ±20 을 넘으면 그 끝값으로 포화
+def rate(value_m_per_s: float) -> float:
+    return max(-RATE_LIMIT_MM_S, min(RATE_LIMIT_MM_S, value_m_per_s * M_TO_MM))
+
+
 KstTime = Annotated[str, AfterValidator(stamp)]
 Level = number(ge=0, le=500)  # 수위(mm) 0~500. 벗어나면 잘라 내지 않고 검증 실패
 Elapsed = number(ge=0, le=864_000)  # 경과 시간(초) 0~864000
@@ -51,8 +57,9 @@ class Response(BaseModel):
 # 구역 하나의 측정값
 class Zone(Response):
     levelMm: Level  # 수위(mm)
-    rateMmSec: number(ge=-20, le=20)  # 수위 변화율(mm/s) -20~20
+    rateMmSec: number(ge=-RATE_LIMIT_MM_S, le=RATE_LIMIT_MM_S)  # 수위 변화율(mm/s) -20~20
     source: Literal["measured", "simulated", "estimated", "replay"]  # 실측·가상 실측·모델 추정·재생
+    thresholdMm: number(gt=0) | None = None  # 한계 수위(mm). 이 서버가 더한 필드
 
 
 # A·B·C 세 구역
@@ -109,7 +116,7 @@ class Devices(Response):
 # 경보 하나
 class Alert(Response):
     zone: Literal["A", "B", "C"]  # 경보 구역
-    stage: Literal["caution", "warning", "evacuate"]  # 경보 단계: 주의·경고·대피
+    stage: Literal["caution", "warning", "evacuate"]  # 경보 단계: 주의·경계·침수
     etaSec: NonNegative | None = None  # 임계 도달까지 남은 시간(초), 모르면 null
 
 
@@ -162,8 +169,9 @@ class Board(Response):
                 "zones": {
                     z: {
                         "levelMm": s.levels_m[z] * M_TO_MM,  # 수위 m → mm
-                        "rateMmSec": s.rates_m_per_s[z] * M_TO_MM,  # 변화율 m/s → mm/s
+                        "rateMmSec": rate(s.rates_m_per_s[z]),  # 변화율 mm/s, ±20 포화
                         "source": s.zone_sources[z],
+                        "thresholdMm": s.thresholds_m[z] * M_TO_MM,  # 한계 수위 m → mm
                     }
                     for z in ZONES
                 },
@@ -269,6 +277,13 @@ class Message(Intake):
     tMs: Annotated[int, Field(ge=0)]  # 장치 시각(ms, 0 이상)
     readings: Readings  # 읽은 값
     sensorStatus: Status  # 센서 상태
+
+
+# 장치 메시지의 영수증(POST /api/ingest 응답)
+class Receipt(Response):
+    deviceId: str  # 받은 장치 ID
+    seq: int  # 받은 메시지 순번
+    dataSource: str  # 받은 시점의 입력원. live 가 아니면 메시지는 쓰이지 않음
 
 
 
@@ -381,12 +396,13 @@ def frame(
     }
 
 
-# 사건 기록 한 줄을 만듦
-def event(kind: str, elapsed_s: float, time: datetime, message: str) -> dict:
+# 사건 기록 한 줄을 만듦. details 는 종류별 덧붙임(stage: zone·stage·previous·etaSec)
+def event(kind: str, elapsed_s: float, time: datetime, message: str, **details) -> dict:
     return {
         "type": "event",  # 줄 종류: 사건
         "kind": kind,
         "elapsedSec": elapsed_s,
         "time": moment(time),
         "message": message,
+        **details,
     }

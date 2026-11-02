@@ -4,6 +4,7 @@ import time
 from app.adapters.clock import Wall
 from app.adapters.jsonl_log import LOG_DIR, Jsonl
 from app.adapters.sim_source import Sim
+from app.adapters.stub import Stub
 from app.main import factory
 from datetime import date
 
@@ -98,13 +99,14 @@ def test_background_ticker_runs_due_ticks(builder, clock):
     assert client.get("/api/state").json()["elapsedSec"] == 3
 
 
-# 기본 구성이 가상 입력원·실제 시계·backend 기록 폴더인지 검사
+# 기본 구성이 가상 입력원·실제 시계·backend 기록 폴더·기록만 하는 알림인지 검사
 def test_default_wiring_uses_the_sim_the_system_clock_and_the_backend_logs():
     service = factory(start_ticker=False).state.service
     assert isinstance(service.source, Sim)
     assert isinstance(service.clock, Wall)
     assert isinstance(service.experiment_log, Jsonl)
     assert service.experiment_log.directory == LOG_DIR
+    assert isinstance(service.notifier, Stub)
 
 
 UNSERVABLE_CONFIGS = {  # 기동은 되지만 계약대로 응답 못 하는 구성들
@@ -118,6 +120,11 @@ UNSERVABLE_CONFIGS = {  # 기동은 되지만 계약대로 응답 못 하는 구
     # 예측 시점이 계약의 키와 다름
     "horizons-not-the-contract-keys": ("prediction", {"horizons_s": [10, 20], "valid_for_s": 5}),
     "gain-over-one": ("correction", {"gain": 1.5, "max_age_s": 3.0, "invalid_after_s": 10.0}),
+    # 경계 도달 상한이 주의 도달 상한보다 큼
+    "warning-eta-over-caution": (
+        "alerts",
+        {"caution_eta_s": 30, "warning_eta_s": 60, "release_ratio": 0.9, "release_hold_s": 10},
+    ),
     # 구성에 날짜가 있음. 기록 첫 줄에 구성을 적는데 JSON 이 못 담는 값
     "date-in-config": ("calibrated_on", date(2026, 10, 22)),
 }

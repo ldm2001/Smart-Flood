@@ -1,5 +1,5 @@
 import type { Stage } from "./derive";
-import type { Input, Run, Zone, Source } from "./schema";
+import type { Blockage, Input, Run, Snapshot, Zone, Source } from "./schema";
 
 export const ZONES: Record<Zone, { name: string }> = {
   A: { name: "낮은 상가 도로" },  // A 구역: 낮은 상가 도로
@@ -51,3 +51,68 @@ export const RUN_STATE_ICONS: Record<Run, string> = {
   running: "▶︎",  // 진행: 재생 삼각형
   stopped: "■",  // 정지: 네모
 };
+
+export const PLAN_VIEW = { width: 300, height: 160 };  // 평면도 viewBox 크기
+
+// 평면도의 구역 칸(viewBox 좌표)
+export const PLAN_ZONES: Record<Zone, { x: number; y: number; width: number; height: number }> = {
+  A: { x: 10, y: 10, width: 90, height: 100 },
+  B: { x: 105, y: 10, width: 90, height: 100 },
+  C: { x: 200, y: 10, width: 90, height: 100 },
+};
+
+export const INLETS = [  // 빗물받이 셋. 번호 글자, 맡은 구역, 평면도 자리
+  { id: "INLET-01", mark: "①", zone: "A", x: 35, y: 110 },
+  { id: "INLET-02", mark: "②", zone: "A", x: 75, y: 110 },
+  { id: "INLET-03", mark: "③", zone: "B", x: 150, y: 110 },
+] as const;
+
+export const PLAN_PIPE = { y: 135, from: 35, to: 230 };  // 하부 배수관
+
+export const PLAN_METER = { x: 230, y: 125, width: 60, height: 25 };  // 배수 계량 상자
+
+// 보호 입력 넷(장치 둘, 플로트, 비상정지)
+export const DEVICE_KEYS = ["esp32_1", "esp32_2", "floatSwitch", "emergencyStop"] as const;
+
+// 장치 이름 타입
+export type Device = (typeof DEVICE_KEYS)[number];
+
+export const DEVICE_NAMES: Record<Device, string> = {  // 장치 표시 이름
+  esp32_1: "ESP32 #1",
+  esp32_2: "ESP32 #2",
+  floatSwitch: "플로트 스위치",
+  emergencyStop: "비상정지",
+};
+
+export const DEVICE_LABELS = {  // 장치 값 표시 글. 목록에 없는 값은 그대로 보임
+  online: "정상",
+  normal: "정상",
+  offline: "끊김",
+  unknown: "미상",
+} as const;
+
+export const QUALITY_LABELS: Record<Snapshot["quality"], string> = {  // 입력 품질 표시 글
+  valid: "정상",
+  degraded: "확인 필요",
+  invalid: "사용 중지",
+};
+
+export const QUALITY_TONES: Record<Snapshot["quality"], string> = {  // 입력 품질 글자색
+  valid: "text-(--green)",
+  degraded: "text-amber",
+  invalid: "text-(--red)",
+};
+
+export const BLOCKAGE_LABELS: Record<Blockage, string> = {  // 막힘 종류 표시 글
+  none: "막힘 없음",
+  partial: "부분 막힘",
+  full: "완전 막힘",
+};
+
+export const BLOCKAGE_ICONS: Record<Blockage, string> = {  // 막힘 종류 아이콘
+  none: "○",
+  partial: "◐",
+  full: "●",
+};
+
+export const HEALTH_ICONS = { ok: "✓", check: "!" } as const;  // 정상·확인 아이콘

@@ -66,15 +66,16 @@ echo 'NEXT_PUBLIC_API_BASE=http://localhost:8000' > .env.development.local
 | `src/app/ops/page.tsx` | `/ops/` 운영·설정 (S3 에서 채운다) |
 | `src/app/logs/page.tsx` | `/logs/` 기록·재생 (S4 에서 채운다) |
 | `src/app/icon.svg` | 탭 아이콘. 머리글의 ≋ 표시와 같은 모양이다. SVG 는 XML 이라 주석에 `--` 를 쓰면 그림이 깨진다 |
-| `src/components/` | 화면 조각. 파일 이름과 내보내는 이름이 다르다: `MonitorView.tsx`(종합 관제 화면) → `Monitor`, `StatusBanner.tsx` → `Headline`, `ZoneGauge.tsx` → `Gauge`, `LevelChart.tsx` → `Chart`, `ModeBadge.tsx` → `Mode`, `ConnectionBadge.tsx` → `Signal`. `CityPlan`·`AlertTimeline`·`DeviceStatus` 는 S2 에서 붙인다 |
-| `src/lib/schema.ts` | `/api/state` zod 스키마. 백엔드 계약(`docs/api-contract.md`)과 같은 제약 |
-| `src/lib/api.ts` | `fetch` 래퍼. 기본 5초 제한, `/api/state` 는 3초. 응답을 받은 시각을 함께 돌려준다 |
+| `src/components/` | 화면 조각. 파일 이름과 내보내는 이름이 다르다. `MonitorView.tsx`(종합 관제 화면)는 `Monitor`, `StatusBanner.tsx` 는 `Headline`, `ZoneGauge.tsx` 는 `Gauge`, `LevelChart.tsx` 는 `Chart`, `ModeBadge.tsx` 는 `Mode`, `ConnectionBadge.tsx` 는 `Signal`, `CityPlan.tsx`("도시 모형 상태" 칸)는 `Plan`, `DeviceStatus.tsx`("현장 장치 상태" 칸)는 `Devices`, `AlertTimeline.tsx`("위험 판단·시험용 문자" 칸)는 `Timeline`, `EventLog.tsx`("이벤트 기록" 칸)는 `Journal` 을 내보낸다. S2 의 네 칸은 같은 이름의 `.test.tsx` 를 옆에 둔다 |
+| `src/lib/schema.ts` | `/api/state` zod 스키마. 백엔드 계약(`docs/api-contract.md`)과 같은 제약. 기록 사건 응답(`/api/logs/{id}/events`)의 스키마와 검사 함수 `chronicle` 도 둔다 |
+| `src/lib/api.ts` | `fetch` 래퍼. 기본 5초 제한, `/api/state` 는 3초. 응답을 받은 시각을 함께 돌려준다. `logbook` 은 기록 사건을 읽고, 기록이 없어 404 면 빈 목록을 돌려준다 |
 | `src/lib/useSnapshot.ts` | `/api/state` 1초 폴링(SWR)과 수위 이력(최근 600개), `/api/config` 한계 수위 |
-| `src/lib/derive.ts` | 위험 단계, 도달 시간, %, 예측 만료, 연결 끊김, 차트 경로를 계산하는 순수 함수. 시간은 인자로 받는다 |
+| `src/lib/useEvents.ts` | 기록 사건 읽기(SWR). 실험 번호, 경보(구역과 단계), 실행 상태로 만든 키가 바뀔 때만 읽는다. 받은 목록은 실험 번호와 함께 두어, 다시 읽는 동안이나 읽기가 실패해도 같은 실험이면 그대로 보여 준다 |
+| `src/lib/derive.ts` | 위험 단계, 도달 시간, %, 예측 만료, 연결 끊김, 차트 경로, 사건 키와 재생 범위, 타임라인 시각, 장치 상태, 평면도 좌표를 계산하는 순수 함수. 시간은 인자로 받는다 |
 | `src/lib/useNow.ts` | 1초마다 바뀌는 현재 시각. 정적 프리렌더 때는 `null` |
 | `src/lib/useSettings.ts` | 구역 한계 수위 설정(브라우저 localStorage). 값이 없거나 깨지면 기본값 A 45·B 55·C 65 mm |
-| `src/lib/mock.ts` | 서버 없이 보여 줄 가상 스냅샷 |
-| `src/lib/layout-data.ts` | 구역 이름, 라벨, 아이콘 같은 고정 표 |
+| `src/lib/mock.ts` | 서버 없이 보여 줄 가상 스냅샷과 가상 사건(`diary`). 사건 글은 서버 기록과 같은 꼴이다 |
+| `src/lib/layout-data.ts` | 구역 이름, 라벨, 아이콘 같은 고정 표. 평면도 좌표(구역 칸, 빗물받이, 배수관, 계량 상자)와 장치·입력 품질·막힘의 표시 글도 둔다 |
 | `src/styles/tokens.css` | 색·글꼴 토큰 |
 | `scripts/check-out.mjs` | 빌드 결과 검사(postbuild) |
 | `scripts/check-state.mjs` | 실제 `/api/state` 응답 검사(`npm run check:state`). `src/lib/schema.ts` 를 그대로 읽는다 |
@@ -86,14 +87,14 @@ echo 'NEXT_PUBLIC_API_BASE=http://localhost:8000' > .env.development.local
 |---|---|---|
 | 1 | 타입 오류 0 | `npm run typecheck` |
 | 2 | eslint 오류 0, react-hooks 여섯 규칙이 error | `npm run lint`, `tests/eslint-config.test.ts` |
-| 3 | 임계값·예측 경계, 단계 우선순위, 예측 만료·연결 끊김, 차트 경로 | `src/lib/derive.test.ts` |
+| 3 | 임계값·예측 경계, 단계 우선순위, 예측 만료·연결 끊김, 차트 경로, 사건 키·재생 범위·타임라인·장치 상태·평면도 계산 | `src/lib/derive.test.ts` |
 | 4 | 파생 값 이름의 `useState` 없음 | `tests/static-rules.test.ts` |
 | 5 | 렌더 경로에 `Date.now(`·`new Date(`·`Math.random(` 없음(`useNow.ts` 제외). `useNow.ts` 의 `wall` 은 응답 받은 시각을 적는 `api.ts` 만 쓴다 | `tests/static-rules.test.ts` |
 | 6 | 정적 export 성공, `out/` 에 세 화면의 `index.html` | `npm run build` 의 postbuild(`scripts/check-out.mjs`) |
 | 7 | 정적 export 와 맞지 않는 기능 없음 | `tests/static-rules.test.ts` |
-| 8 | zod 가 계약 예시를 통과시키고 범위 밖 값을 거부 | `src/lib/schema.test.ts` |
-| 9 | 서버 미연결이면 "가상 데이터" 문구가 보임 | `tests/mock-render.test.tsx`(mock 화면 렌더 검사) |
-| 10 | 실제 `/api/state` 응답이 zod 통과 | 백엔드를 띄우고 `npm run check:state`. 스크립트 자체는 `tests/check-state.test.ts` 가 검사한다 |
+| 8 | zod 가 계약 예시를 통과시키고 범위 밖 값을 거부. 기록 사건 응답 예시도 같은 방식으로 본다 | `src/lib/schema.test.ts` |
+| 9 | 서버 미연결이면 "가상 데이터" 문구가 보임. 연결 중에도 S2 의 네 칸이 보이고, 가상 사건이 타임라인과 기록에 차며, 재생 중에는 지금 경과 초 뒤의 사건을 숨김 | `tests/mock-render.test.tsx`(mock 화면 렌더 검사), 네 칸 옆의 `.test.tsx` |
+| 10 | 실제 `/api/state` 응답이 zod 통과. 실제 기록 사건 응답도 `chronicle` 통과 | 백엔드를 띄우고 `npm run check:state`. 스크립트 자체는 `tests/check-state.test.ts` 가 검사한다. 사건 응답은 `curl` 로 받은 `/api/logs/{id}/events` 본문을 `chronicle` 에 넣어 본다 |
 
 postbuild 검사는 6번 외에 세 가지를 더 본다. 세 화면 모두에 시험용 고지가 있는지, 세 화면 모두에 탭 아이콘 링크가 있고 `out/icon.svg` 가 있는지(없으면 브라우저가 `/favicon.ico` 를 찾다가 404 를 낸다), `out/` 의 텍스트 파일에 개발용 주소 `localhost:8000` 이 없는지.
 
@@ -103,6 +104,7 @@ postbuild 검사는 6번 외에 세 가지를 더 본다. 세 화면 모두에 �
 - 실패해도 마지막 정상 응답을 그대로 보여 준다. 마지막 정상 수신 뒤 4초가 넘으면 머리글 배지가 "연결 끊김 · 마지막 수신 HH:MM:SS" 로 바뀐다. 서버가 다시 답하면 새로 고침 없이 이어진다.
 - 첫 응답이나 첫 실패 전(정적 프리렌더 포함)에는 배지에 "연결 중" 을 달고 값 자리를 "—" 로 둔다.
 - 위험 단계와 도달 시간(eta)은 서버가 보낸 `alerts` 만 따른다. 화면이 단계 전환을 만들지 않는다.
+- 타임라인 칸과 "이벤트 기록" 칸은 서버 기록의 사건(`/api/logs/{id}/events`)만 보여 준다. 실험 번호가 기록 번호 꼴(`RECORD_ID`)일 때만 읽고, 키(실험 번호, 경보, 실행 상태)가 바뀔 때만 다시 읽는다. 5초 제한이고, 404 는 빈 목록으로 본다. 계약 위반은 다시 묻지 않고, 그 밖의 실패는 1초 뒤 다시 묻는다. 재생 중에는 재생하는 기록의 번호로 읽고 지금 경과 초까지의 사건만 보인다. 화면은 POST 를 보내지 않는다.
 - 한계 수위는 `/api/config` 에서 받는다. 한 번 받으면 다시 묻지 않고, 받기 전에는 1초마다 다시 묻는다. 받기 전에는 "한계 —" 로 둔다.
 - 예측 기준 시각(`predictionMeta.basisTime`)에서 `validForSec` 이 지나면 머리글에 "예측 만료" 를 단다. 백엔드는 실험이 정지·대기 상태일 때 기준 시각을 멈추므로, 연결이 정상이어도 정지 몇 초 뒤부터 "예측 만료" 가 뜬다.
 - 수위 이력(차트)은 화면이 받은 응답으로 쌓는다(최근 600개). 다른 메뉴로 갔다 오거나 실험 번호·입력원이 바뀌면 처음부터 다시 쌓는다.
@@ -114,6 +116,7 @@ postbuild 검사는 6번 외에 세 가지를 더 본다. 세 화면 모두에 �
 - 기존 바닐라 화면의 데모(보통 강우, INLET-02 부분 막힘)를 180초 주기로 되풀이한다. 같은 시각이면 같은 값이 나온다.
 - mock 의 위험 단계는 `derive.ts` 규칙으로 계산한다. 서버에 붙은 뒤에는 서버가 보낸 `alerts`·`events` 를 그대로 보여 준다.
 - mock 의 한계 수위는 브라우저 설정(`useSettings`, 기본 A 45·B 55·C 65 mm)을 쓴다. 서버에 붙으면 서버 값을 쓴다.
+- mock 은 같은 180초 주기에 맞춘 가상 사건(`diary`)도 만들어 타임라인과 기록 칸을 채운다. 사건 글은 서버 기록과 같은 꼴이다.
 - 서버 없이 정적 파일만 띄우면 `/api/state`·`/api/config` 가 1초마다 404 를 낸다. 브라우저 콘솔의 이 404 는 정상이다.
 
 ## 개발 규칙

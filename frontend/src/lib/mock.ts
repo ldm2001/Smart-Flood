@@ -1,5 +1,14 @@
-import { notices, verdicts, stamp, type Prediction, type Sample, type Thresholds } from "./derive";
-import type { Snapshot, Zone, Source } from "./schema";
+import {
+  notices,
+  verdicts,
+  stamp,
+  ZONE_IDS,
+  type Prediction,
+  type Sample,
+  type Stage,
+  type Thresholds,
+} from "./derive";
+import type { LogEvent, Snapshot, Zone, Source } from "./schema";
 
 export const MOCK_CYCLE_SEC = 180;  // 가짜 데이터 반복 주기(초). 같은 초면 같은 값
 
@@ -19,6 +28,13 @@ const RATES: Record<Zone, number> = {  // 구역별 수위 상승 속도(mm/s)
 
 const SOURCES: Record<Zone, Source> = { A: "simulated", B: "simulated", C: "estimated" };
 
+const NAMES: Record<Stage, string> = {  // 사건 글 단계 이름
+  safe: "정상",
+  caution: "주의",
+  warning: "경계",
+  evacuate: "침수",
+};
+
 // e 초째 수위. 속도가 일정해 1초 단계 계산과 같음
 const level = (id: Zone, e: number) => amount(Math.min(MAX_MM, START_MM[id] + RATES[id] * e));
 
@@ -29,13 +45,8 @@ const forecast = (id: Zone, levelMm: number): Prediction => ({
   "30": amount(levelMm + RATES[id] * 30),
 });
 
-// 시각만으로 정해지는 가짜 서버 상태를 만듦
-export function demo(nowMs: number, thresholds: Thresholds): Snapshot {
-  const epochSec = Math.floor(nowMs / 1000);  // 초 단위 시각
-  const e = epochSec % MOCK_CYCLE_SEC;
-  const cycle = Math.floor(epochSec / MOCK_CYCLE_SEC);
-  const timestamp = stamp(epochSec * 1000);  // 한국 시각 글자로 바꾼 기준 시각
-
+// 주기 안 e 초의 구역 수위와 예측
+function moment(e: number) {
   const zone = (id: Zone) => ({ levelMm: level(id, e), rateMmSec: RATES[id], source: SOURCES[id] });
   const zones = { A: zone("A"), B: zone("B"), C: zone("C") };
   const predictions = {
@@ -43,6 +54,16 @@ export function demo(nowMs: number, thresholds: Thresholds): Snapshot {
     B: forecast("B", zones.B.levelMm),
     C: forecast("C", zones.C.levelMm),
   };
+  return { zones, predictions };
+}
+
+// 시각만으로 정해지는 가짜 서버 상태를 만듦
+export function demo(nowMs: number, thresholds: Thresholds): Snapshot {
+  const epochSec = Math.floor(nowMs / 1000);  // 초 단위 시각
+  const e = epochSec % MOCK_CYCLE_SEC;
+  const cycle = Math.floor(epochSec / MOCK_CYCLE_SEC);
+  const timestamp = stamp(epochSec * 1000);  // 한국 시각 글자로 바꾼 기준 시각
+  const { zones, predictions } = moment(e);
 
   return {  // 서버 응답과 같은 모양으로 반환
     experimentId: `EXP-DEMO-${String(cycle % 1000).padStart(3, "0")}`,
@@ -64,7 +85,7 @@ export function demo(nowMs: number, thresholds: Thresholds): Snapshot {
       basisTime: timestamp,
       basisElapsedSec: e,
       validForSec: 5,
-      modelVersion: "mock-legacy-sim",  // 모델 이름(가짜 표시)
+      modelVersion: "mock-sim",  // 모델 이름(가짜 표시)
       assumptions: {
         rule: "현재 강우와 막힘이 예측 구간 동안 유지된다",
         rainMmPerHour: 60,  // 가정한 강우(mm/h)
@@ -84,4 +105,36 @@ export function trail(nowMs: number): Sample[] {
     B: level("B", e),
     C: level("C", e),
   }));
+}
+
+// 주기 시작부터 지금까지의 가짜 단계 전환 사건. 서버와 같은 글 꼴
+export function diary(nowMs: number, thresholds: Thresholds): LogEvent[] {
+  const epochSec = Math.floor(nowMs / 1000);
+  const e = epochSec % MOCK_CYCLE_SEC;  // 주기 안의 초
+  const last: Record<Zone, Stage> = { A: "safe", B: "safe", C: "safe" };  // 구역별 직전 단계
+  const events: LogEvent[] = [];
+  for (let t = 0; t <= e; t += 1) {
+    const grades = verdicts(moment(t), thresholds);
+    for (const zone of ZONE_IDS) {
+      const { stage, etaSec } = grades[zone];
+      if (stage === last[zone]) continue;  // 단계가 그대로면 사건 없음
+      const tail =
+        stage === "evacuate" ? ", 한계 도달" : etaSec === null ? "" : `, 한계까지 ${etaSec} 초`;
+      const message = `${zone} 구역 ${NAMES[stage]} (이전 ${NAMES[last[zone]]}${tail})`;
+      const time = stamp((epochSec - e + t) * 1000);  // 주기 시작 + t 초
+      events.push({
+        type: "event",
+        kind: "stage",
+        elapsedSec: t,
+        time,
+        zone,
+        stage,
+        previous: last[zone],
+        etaSec,
+        message,
+      });
+      last[zone] = stage;
+    }
+  }
+  return events;
 }

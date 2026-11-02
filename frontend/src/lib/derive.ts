@@ -1,7 +1,16 @@
-import { ZONES } from "./layout-data";
-import type { Alert, Input, Zone, Source } from "./schema";
+import { DEVICE_KEYS, DEVICE_LABELS, PLAN_VIEW, ZONES } from "./layout-data";
+import type {
+  Alert,
+  Blockage,
+  Input,
+  LogEvent,
+  Snapshot,
+  Source,
+  StageEvent,
+  Zone,
+} from "./schema";
 
-// 경보 단계 타입(정상·주의·경고·침수)
+// 경보 단계 타입(정상·주의·경계·침수)
 export type Stage = "safe" | "caution" | "warning" | "evacuate";
 // 구역별 한계 수위(mm) 타입
 export type Thresholds = Record<Zone, number>;
@@ -27,10 +36,10 @@ export function verdict(zoneId: Zone, levelMm: number, prediction: Prediction, t
   const hit = HORIZON_KEYS.find((key) => prediction[key] >= thresholdMm);
   if (hit === undefined) return { zoneId, stage: "safe", etaSec: null };  // 30초 내 미도달 = 정상
   const etaSec = Number(hit);
-  return { zoneId, stage: etaSec <= 10 ? "warning" : "caution", etaSec };  // ≤10초 경고, 이후 주의
+  return { zoneId, stage: etaSec <= 10 ? "warning" : "caution", etaSec };  // ≤10초 경계, 이후 주의
 }
 
-// 세 구역의 등급을 한 번에 구
+// 세 구역의 등급을 한 번에 구함
 export function verdicts(
   snapshot: { zones: Record<Zone, { levelMm: number }>; predictions: Record<Zone, Prediction> },
   thresholds: Thresholds,
@@ -46,12 +55,6 @@ export function peak(statuses: Record<Zone, Grade>): Grade {
   return ZONE_IDS.map((id) => statuses[id]).sort(
     (a, b) => STAGE_ORDER[b.stage] - STAGE_ORDER[a.stage] || rank(a) - rank(b),
   )[0];  // 맨 앞 하나가 가장 위험한 구역
-}
-
-// 가장 먼저 한계에 닿는 구역. 닿는 구역이 없으면 null
-export function leader(statuses: Record<Zone, Grade>): Grade | null {
-  const reaching = ZONE_IDS.map((id) => statuses[id]).filter((status) => status.etaSec !== null);
-  return reaching.sort((a, b) => rank(a) - rank(b))[0] ?? null;  // 가장 빨리 닿는 구역을 돌려줌
 }
 
 // 서버 경보를 구역별 등급으로 변환(서버 모드는 이것만 씀). 없는 구역은 정상
@@ -143,10 +146,10 @@ export function outage(nowMs: number, lastOkMs: number | null): boolean {
   return lastOkMs === null || nowMs - lastOkMs > DISCONNECT_AFTER_MS;
 }
 
-// 선행 시간(초): 실제 도달 시각 - 주의보 시각
-export function lead(cautionAtMs: number | null, arrivalAtMs: number | null): number | null {
-  if (cautionAtMs === null || arrivalAtMs === null) return null;
-  return (arrivalAtMs - cautionAtMs) / 1000;
+// 선행 시간(초): 실제 도달 시각 - 위험 판단 시각
+export function lead(judgedAtMs: number | null, arrivalAtMs: number | null): number | null {
+  if (judgedAtMs === null || arrivalAtMs === null) return null;
+  return (arrivalAtMs - judgedAtMs) / 1000;
 }
 
 const SEOUL = new Intl.DateTimeFormat("en-US", {  // Asia/Seoul 고정(서머타임 없어 늘 +09:00)
@@ -307,4 +310,106 @@ export function columns(ys: Record<Zone, number>, height: number): Record<Zone, 
     return column;
   };
   return { A: slot(ys.A), B: slot(ys.B), C: slot(ys.C) };
+}
+
+export const RECORD_ID = /^EXP-[0-9]{8}-[0-9]{3,}$/;  // 백엔드 EXPERIMENT_ID 와 같은 꼴
+export const EVENT_ROWS = 30;  // 사건 기록 최대 줄 수
+
+// 사건 읽기 키 타입: 이름, 실험 번호, 구역·단계 쌍, 실험 상태
+export type Topic = readonly ["events", string, string, string];
+
+// 받은 사건 목록과 그 실험 번호
+export interface Pack {
+  id: string;  // 실험 번호
+  list: readonly LogEvent[];  // 기록 순서의 사건
+}
+
+// 구역 타임라인의 세 사건
+export interface Milestones {
+  judgement: StageEvent | null;  // 위험 판단: 회차 첫 사건
+  request: StageEvent | null;  // 문자 요청: 회차의 첫 경계 이상
+  arrival: StageEvent | null;  // 실제 도달: 회차의 침수
+}
+
+// 사건 읽기 키. 실험 번호가 기록 꼴이 아니면 null. 구역·단계 쌍은 서버의 A·B·C 순서
+export function topic(snapshot: Snapshot | null): Topic | null {
+  if (snapshot === null || !RECORD_ID.test(snapshot.experimentId)) return null;
+  const pairs = snapshot.alerts.map((alert) => `${alert.zone}:${alert.stage}`).join(",");
+  return ["events", snapshot.experimentId, pairs, snapshot.runState ?? "none"];
+}
+
+// 지금 보일 사건. 재생 중이면 지금 경과 초 이하만
+export function scope(
+  events: readonly LogEvent[],
+  state: Pick<Snapshot, "mode" | "elapsedSec">,
+): readonly LogEvent[] {
+  if (state.mode !== "replay") return events;
+  return events.filter((event) => event.elapsedSec <= state.elapsedSec);
+}
+
+// 사건 기록 줄. 최신이 위로 30개까지
+export function rows(events: readonly LogEvent[]): LogEvent[] {
+  return [...events].reverse().slice(0, EVENT_ROWS);
+}
+
+// 구역의 마지막 회차에서 판단·요청·도달 사건을 고름
+export function milestones(events: readonly LogEvent[], zone: Zone): Milestones {
+  const own = events.filter(
+    (event): event is StageEvent => event.kind === "stage" && event.zone === zone,
+  );
+  let end = own.findIndex((event) => event.stage === "evacuate");  // 첫 침수
+  for (let i = own.length - 1; end < 0 && i >= 0; i -= 1) {  // 침수가 없으면 마지막 비정상
+    if (own[i].stage !== "safe") end = i;
+  }
+  if (end < 0) return { judgement: null, request: null, arrival: null };  // 회차 없음
+  let start = 0;  // 정상에서 벗어난 자리가 없으면 처음
+  for (let i = end; i >= 0; i -= 1) {
+    if (own[i].previous === "safe") {
+      start = i;
+      break;
+    }
+  }
+  const span = own.slice(start, end + 1);
+  const request = span.find((event) => STAGE_ORDER[event.stage] >= STAGE_ORDER.warning) ?? null;
+  const arrival = own[end].stage === "evacuate" ? own[end] : null;
+  return { judgement: own[start], request, arrival };
+}
+
+// 장치 값의 표시 글과 정상 여부. 모르는 값은 그대로 보임
+export function condition(value: string): { label: string; ok: boolean } {
+  const known = Object.hasOwn(DEVICE_LABELS, value);  // constructor 같은 이름은 거름
+  const label = known ? DEVICE_LABELS[value as keyof typeof DEVICE_LABELS] : value;
+  return { label, ok: value === "online" || value === "normal" };
+}
+
+// 보호 입력 넷의 정상 여부
+export function readiness(devices: Snapshot["devices"]): boolean {
+  return DEVICE_KEYS.every((key) => condition(devices[key]).ok);
+}
+
+// 빗물받이 하나의 막힘 종류. 막힌 곳이 아니면 none
+export function obstruction(blockage: Snapshot["blockage"], inlet: string): Blockage {
+  return blockage.location === inlet ? blockage.type : "none";
+}
+
+// 지금 실험의 사건 목록. 읽을 번호가 없으면 빈 목록, 아직 못 받았으면 null
+export function holding(id: string | null, pack: Pack | null): readonly LogEvent[] | null {
+  if (id === null) return [];
+  return pack !== null && pack.id === id ? pack.list : null;
+}
+
+// 평면도 좌표를 겹친 글자의 CSS 자리(%)로 변환
+export function spot(x: number, y: number): { left: string; top: string } {
+  const left = Math.round((x / PLAN_VIEW.width) * 10000) / 100;  // 소수 둘째 자리까지
+  const top = Math.round((y / PLAN_VIEW.height) * 10000) / 100;
+  return { left: `${left}%`, top: `${top}%` };
+}
+
+// 구역 칸 안의 물 높이. 아래에서부터 비율만큼 채움
+export function pool(
+  rect: { y: number; height: number },
+  ratio: number,
+): { y: number; height: number } {
+  const height = rect.height * ratio;
+  return { y: rect.y + rect.height - height, height };
 }
