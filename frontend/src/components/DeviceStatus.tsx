@@ -7,20 +7,26 @@ import {
   QUALITY_TONES,
 } from "@/lib/layout-data";
 import type { Snapshot } from "@/lib/schema";
+import { Glyph } from "./Glyph";
 
-const mark = (ok: boolean) => `${ok ? HEALTH_ICONS.ok : HEALTH_ICONS.check} `;  // 아이콘과 띄어쓰기
+// 정상·확인 아이콘과 띄어쓰기. 색은 글자색을 따름
+const mark = (ok: boolean) => (
+  <>
+    <Glyph name={ok ? HEALTH_ICONS.ok : HEALTH_ICONS.check} />{" "}
+  </>
+);
 
 // 보호 입력과 입력 품질, 출력 잠금
 export function Devices({ snapshot }: { snapshot: Snapshot | null }) {
   const ready = snapshot && readiness(snapshot.devices);  // 보호 입력 넷의 정상 여부. 연결 중 null
   return (
     <section aria-label="현장 장치 상태" className="panel p-5">
-      <h2 className="mb-4 text-xl font-bold">현장 장치 상태</h2>
+      <h2 className="mb-4 text-lg font-medium">현장 장치 상태</h2>
       {snapshot === null ? (
-        <p className="text-lg font-bold">—</p>
+        <p className="text-lg font-medium">—</p>
       ) : (
-        <p className={`text-lg font-bold ${ready ? "text-(--green)" : "text-amber"}`}>
-          <span aria-hidden="true">{mark(ready === true)}</span>
+        <p className={`text-lg font-medium ${ready ? "text-(--green)" : "text-amber"}`}>
+          {mark(ready === true)}
           {ready ? "보호 입력 정상" : "보호 상태 확인"}
         </p>
       )}
@@ -29,21 +35,21 @@ export function Devices({ snapshot }: { snapshot: Snapshot | null }) {
           const health = snapshot && condition(snapshot.devices[key]);  // 표시 글과 정상 여부
           return (
             <li key={key}>
-              {health && <span aria-hidden="true">{mark(health.ok)}</span>}
+              {health && mark(health.ok)}
               {`${DEVICE_NAMES[key]} · ${health ? health.label : "—"}`}
             </li>
           );
         })}
       </ul>
       <p className={snapshot ? `mt-3 ${QUALITY_TONES[snapshot.quality]}` : "mt-3"}>
-        {snapshot && <span aria-hidden="true">{mark(snapshot.quality === "valid")}</span>}
+        {snapshot && mark(snapshot.quality === "valid")}
         {`입력 품질 · ${snapshot ? QUALITY_LABELS[snapshot.quality] : "—"}`}
       </p>
       {// 계약의 outputsLocked 는 늘 true 라 보이기만 함
       }
       <p className="mt-3 flex flex-wrap items-center gap-2">
         제어 출력
-        <span className="pill border border-line bg-transparent text-muted">출력 잠금</span>
+        <span className="chip border border-line">출력 잠금</span>
       </p>
       {// 5초는 backend/config.yaml 의 offline_after_s 와 같음
       }

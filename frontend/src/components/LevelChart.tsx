@@ -1,6 +1,7 @@
 import {
   plot,
   columns,
+  notches,
   ZONE_IDS,
   type Prediction,
   type Sample,
@@ -15,9 +16,9 @@ const { width: W, height: H } = CHART_OPTIONS;  // 그림 좌표계의 가로와
 const percent = (value: number, whole: number) => `${Math.round((value / whole) * 10000) / 100}%`;
 
 const LABEL_HEIGHT = 28;  // 한계 라벨 한 줄의 좌표 높이(상자가 가장 낮을 때 27 단위라 28)
-const LABEL_STEP_REM = 5;  // 라벨 옆 칸 간격(rem). 라벨 폭 약 4.4rem 보다 넓게
-const END_HEIGHT = 26;  // 선 끝 글자 하나의 좌표 높이(약 24px)
-const END_STEP_REM = 1.75;  // 선 끝 글자 옆 칸 간격(rem). 글자 폭 약 1.4rem 보다 넓게
+const LABEL_STEP_REM = 5;  // 라벨 옆 칸 간격(rem). 라벨 폭 약 4.8rem 보다 넓게
+const END_HEIGHT = 26;  // 선 끝 글자 하나의 좌표 높이(약 22px)
+const END_STEP_REM = 1.75;  // 선 끝 글자 옆 칸 간격(rem). 글자 폭 약 1.2rem 보다 넓게
 
 // 차트가 받는 값
 interface Props {
@@ -35,7 +36,7 @@ export function Chart({ samples, predictions, thresholds }: Props) {
 
   return (
     <section aria-label="수위 변화" className="panel p-5">
-      <h2 className="mb-4 text-xl font-bold">수위 변화</h2>
+      <h2 className="mb-4 text-lg font-medium">수위 변화</h2>
       {// 눈금 열과 그림 열, 두 칸으로 나눔
       }
       <div className="grid grid-cols-[3rem_1fr] gap-x-3">
@@ -45,9 +46,17 @@ export function Chart({ samples, predictions, thresholds }: Props) {
           {// 눈금 값마다 글자 하나를 그림
           }
           {chart.gridlines.map(({ value, y }) => (
-            <span key={value} className="absolute right-0 -translate-y-1/2 text-muted tabular-nums" style={{ top: percent(y, H) }}>
+            <span key={value} className="absolute right-3 -translate-y-1/2 font-mono text-muted tabular-nums" style={{ top: percent(y, H) }}>
               {value}
             </span>
+          ))}
+          {// 표척 눈금. 눈금 값 자리는 긴 선, 그 사이 가운데는 짧은 선
+          }
+          {chart.gridlines.map(({ value, y }) => (
+            <span key={`major${value}`} className="absolute right-0 h-px w-2 -translate-y-1/2 bg-muted" style={{ top: percent(y, H) }} />
+          ))}
+          {notches(chart.gridlines).map((y) => (
+            <span key={`minor${y}`} className="absolute right-0 h-px w-1 -translate-y-1/2 bg-muted" style={{ top: percent(y, H) }} />
           ))}
         </div>
 
@@ -76,27 +85,27 @@ export function Chart({ samples, predictions, thresholds }: Props) {
                   x2={W}
                   y2={thresholdY[id]}
                   className="stroke-(--zone)"
-                  strokeWidth={1.5}
-                  strokeDasharray="2 6"
+                  strokeWidth={1}
+                  strokeDasharray="2 4"
                   vectorEffect="non-scaling-stroke"
                 />
               ))}
             {nowX !== null && (
-              <line x1={nowX} y1={0} x2={nowX} y2={H} className="stroke-muted" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+              <line x1={nowX} y1={0} x2={nowX} y2={H} className="stroke-muted" strokeWidth={1} vectorEffect="non-scaling-stroke" />
             )}
             {// 구역마다 수위 선 묶음을 그림
             }
             {ZONE_IDS.map((id) => (
               <g key={id} data-zone={id} className="fill-none stroke-(--zone)">
                 {chart.measured[id] && (
-                  <path d={chart.measured[id]} strokeWidth={3} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                  <path d={chart.measured[id]} strokeWidth={2} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
                 )}
                 {chart.isolated[id].map(({ x, y }) => (
                   <path key={x} d={`M ${x} ${y} h 0`} strokeWidth={6} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
                 ))}
                 {chart.predicted[id] && (
                   // +30초 예측 점선
-                  <path d={chart.predicted[id]} strokeWidth={2.5} strokeDasharray="8 6" vectorEffect="non-scaling-stroke" />
+                  <path d={chart.predicted[id]} strokeWidth={2} strokeDasharray="8 6" vectorEffect="non-scaling-stroke" />
                 )}
               </g>
             ))}
@@ -109,7 +118,7 @@ export function Chart({ samples, predictions, thresholds }: Props) {
               <span
                 key={id}
                 data-zone={id}
-                className="absolute -translate-y-full whitespace-nowrap rounded bg-panel/80 px-1 text-(--zone) tabular-nums"
+                className="absolute -translate-y-full border-l-2 border-(--zone) bg-panel/80 px-1 whitespace-nowrap text-soft tabular-nums"
                 style={{ top: percent(thresholdY[id], H), left: `${labelColumn[id] * LABEL_STEP_REM}rem` }}
               >
                 {id} 한계 {thresholds[id]}
@@ -125,7 +134,7 @@ export function Chart({ samples, predictions, thresholds }: Props) {
                 data-zone={id}
                 data-end=""
                 aria-hidden="true"
-                className="absolute -translate-x-full -translate-y-1/2 rounded border-2 border-(--zone) bg-panel px-1 font-bold leading-tight text-(--zone)"
+                className="absolute -translate-x-full -translate-y-1/2 rounded-md border border-(--zone) bg-raised px-1 leading-tight font-medium text-ink"
                 style={{ top: percent(endY[id], H), left: `calc(${percent(nowX, W)} - ${0.25 + endColumn[id] * END_STEP_REM}rem)` }}
               >
                 {id}
@@ -133,7 +142,7 @@ export function Chart({ samples, predictions, thresholds }: Props) {
             ))}
 
           {nowX === null && (
-            <p className="absolute inset-0 grid place-items-center text-lg text-muted">수위 자료 대기</p>
+            <p className="absolute inset-0 grid place-items-center text-muted">수위 자료 대기</p>
           )}
         </div>
 
@@ -160,7 +169,7 @@ export function Chart({ samples, predictions, thresholds }: Props) {
       <ul className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
         {ZONE_IDS.map((id) => (
           <li key={id} data-zone={id} className="flex items-center gap-2">
-            <span aria-hidden="true" className="h-1 w-6 rounded-full bg-(--zone)" />
+            <span aria-hidden="true" className="h-0.5 w-6 rounded-full bg-(--zone)" />
             {id} {ZONES[id].name}
           </li>
         ))}

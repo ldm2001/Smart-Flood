@@ -5,7 +5,12 @@ import { demo } from "@/lib/mock";
 import type { Snapshot } from "@/lib/schema";
 import { Plan } from "./CityPlan";
 
-const content = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+// 아이콘 SVG 를 [이름] 글로 바꾸고 태그를 빼 공백을 하나로 줄여 글만 남기는 도우미
+const content = (html: string) =>
+  html
+    .replace(/<svg[^>]*data-icon="([^"]+)"[^>]*>[\s\S]*?<\/svg>/g, " [$1] ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ");
 const THRESHOLDS = { A: 45, B: 55, C: 65 };  // 구역별 한계 수위(mm)
 const SIM = demo(Date.UTC(2026, 9, 23, 1, 1, 10), THRESHOLDS);  // 10:01:10 KST 의 가상 상태
 const FULL = { location: "INLET-03", type: "full", label: "빗물받이 ③ 완전 막힘" } as const;
@@ -20,33 +25,31 @@ function draw(snapshot: Snapshot | null, thresholds: Thresholds | null = THRESHO
 }
 
 describe("Plan", () => {
-  it("marks a fully blocked inlet in red and bold", () => {
+  it("marks a fully blocked inlet in red and a heavier weight", () => {
     const html = draw({ ...SIM, blockage: FULL });
     const text = content(html);
-    expect(html).toMatch(/<span class="[^"]*font-bold text-\(--red\)" style="[^"]*">③<\/span>/);
+    expect(html).toMatch(/<span class="[^"]*font-medium text-\(--red\)" style="[^"]*">③<\/span>/);
     expect(html).toContain('<circle class="fill-panel stroke-(--red)');
-    expect(html).toContain(
-      '<p class="pill border bg-transparent text-lg border-(--red) text-(--red)">',
-    );
-    expect(text).toContain("● 빗물받이 ③ 완전 막힘");
-    expect(text).toContain("③ INLET-03 · B 구역 · ● 완전 막힘");
-    expect(text).toContain("② INLET-02 · A 구역 · ○ 막힘 없음");
+    expect(html).toContain('<p class="chip border border-(--red) text-(--red)">');
+    expect(text).toContain("[ban] 빗물받이 ③ 완전 막힘");
+    expect(text).toContain("③ INLET-03 · B 구역 · [ban] 완전 막힘");
+    expect(text).toContain("② INLET-02 · A 구역 · [circle] 막힘 없음");
   });
 
   it("marks the partial blockage of the simulation in amber", () => {
     const html = draw(SIM);
-    expect(html).toMatch(/<span class="[^"]*font-bold text-amber" style="[^"]*">②<\/span>/);
+    expect(html).toMatch(/<span class="[^"]*font-medium text-amber" style="[^"]*">②<\/span>/);
     expect(html).toContain('<circle class="fill-panel stroke-amber');
-    expect(content(html)).toContain("◐ 빗물받이 ② 부분 막힘");
+    expect(content(html)).toContain("[half] 빗물받이 ② 부분 막힘");
   });
 
   it("shows a clear drain when nothing is blocked", () => {
     const html = draw({ ...SIM, blockage: CLEAR });
     const text = content(html);
-    expect(html).toContain('<p class="pill border bg-transparent text-lg border-line text-muted">');
-    expect(text).toContain("○ 정상 배수");
-    expect(text.match(/○ 막힘 없음/g)).toHaveLength(3);
-    expect(html).not.toMatch(/font-bold text-(amber|\(--red\))/);  // 굵은 막힘 색 번호 없음
+    expect(html).toContain('<p class="chip border border-line">');
+    expect(text).toContain("[circle] 정상 배수");
+    expect(text.match(/\[circle\] 막힘 없음/g)).toHaveLength(3);
+    expect(html).not.toMatch(/font-medium text-(amber|\(--red\))/);  // 굵은 막힘 색 번호 없음
   });
 
   it("fills the water from the bottom by the threshold ratio", () => {
@@ -60,12 +63,12 @@ describe("Plan", () => {
   it("lists each zone with its level, stage and source", () => {
     const html = draw(SIM);
     const text = content(html);
-    expect(text).toContain("A 낮은 상가 도로 · 44.9 mm · ▲ 경계 · 가상 실측");
-    expect(text).toContain("B 주택 골목 · 31.8 mm · ✓ 정상 · 가상 실측");
-    expect(text).toContain("C 높은 광장 · 18.7 mm · ✓ 정상 · 모델 추정");
+    expect(text).toContain("A 낮은 상가 도로 · 44.9 mm · [triangle] 경계 · 가상 실측");
+    expect(text).toContain("B 주택 골목 · 31.8 mm · [check] 정상 · 가상 실측");
+    expect(text).toContain("C 높은 광장 · 18.7 mm · [check] 정상 · 모델 추정");
     expect(html.match(/>추정<\/span>/g)).toHaveLength(1);  // 추정 표시는 C 하나
     expect(html).toContain(
-      '<rect data-stage="warning" class="fill-none stroke-(--stage,var(--line))',
+      '<rect data-stage="warning" class="fill-none stroke-(--alert,var(--muted))',
     );
   });
 
@@ -97,7 +100,7 @@ describe("Plan", () => {
     expect(text).toContain("누적 배수량 — 유량 —");
     expect(html).not.toContain("fill-brand/35");
     expect(html).not.toContain("data-stage");
-    expect(html).not.toContain("pill border");
+    expect(html).not.toContain("chip border");
     expect(text).not.toMatch(/\d{2}:\d{2}:\d{2}|가상|EXP-/);
   });
 });

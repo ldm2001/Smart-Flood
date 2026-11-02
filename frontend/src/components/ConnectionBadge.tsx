@@ -1,9 +1,12 @@
 import { clock, outage } from "@/lib/derive";
+import type { Icon } from "@/lib/layout-data";
+import { Glyph } from "./Glyph";
 
 // 연결 상태: 대기·정상·끊김
 type Connection = "wait" | "ok" | "lost";
 
-const ICONS: Record<Connection, string> = { wait: "◌", ok: "◉", lost: "✕" };  // 색 없이도 모양 구별
+// 연결 상태별 아이콘. 색 없이도 모양 구별
+const ICONS: Record<Connection, Icon> = { wait: "dots", ok: "wifi", lost: "nowifi" };
 
 // 배지가 받는 값
 interface Props {
@@ -18,10 +21,13 @@ export function Signal({ view, now, receivedAt }: Props) {
     view === "connecting" || now === null ? "wait" : outage(now, receivedAt) ? "lost" : "ok";
   const received = receivedAt === null ? "—" : clock(receivedAt);
   return (
-    <span data-conn={connection} className="pill border border-(--conn) bg-transparent text-(--conn)">
-      {// 상태 아이콘(낭독기는 건너뜀)
+    <span
+      data-conn={connection}
+      className={`chip border ${connection === "lost" ? "border-(--conn) text-ink" : "border-line"}`}
+    >
+      {// 상태 아이콘만 연결 색. 끊기면 테두리도 켬
       }
-      <span aria-hidden="true">{ICONS[connection]}</span>
+      <Glyph name={ICONS[connection]} className="text-(--conn)" />
       {connection === "wait"
         ? "연결 중"
         : `${connection === "ok" ? "연결 정상" : "연결 끊김"} · 마지막 수신 ${received}`}

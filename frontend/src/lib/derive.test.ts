@@ -30,6 +30,8 @@ import {
   holding,
   spot,
   pool,
+  address,
+  notches,
   EVENT_ROWS,
   type Grade,
   type Milestones,
@@ -630,5 +632,20 @@ describe("plan geometry", () => {
     expect(pool(PLAN_ZONES.A, 0.5)).toEqual({ y: 60, height: 50 });
     expect(pool(PLAN_ZONES.A, 0)).toEqual({ y: 110, height: 0 });
     expect(pool(PLAN_ZONES.A, 1)).toEqual({ y: 10, height: 100 });
+  });
+});
+
+describe("address", () => {
+  it("ends every menu path with a slash", () => {
+    expect(address("/")).toBe("/");
+    expect(address("/ops")).toBe("/ops/");
+    expect(address("/ops/")).toBe("/ops/");
+  });
+});
+
+describe("notches", () => {
+  it("puts a minor tick halfway between neighbouring gridlines", () => {
+    expect(notches([{ y: 100 }, { y: 60 }, { y: 20 }])).toEqual([80, 40]);
+    expect(notches([{ y: 10 }])).toEqual([]);
   });
 });

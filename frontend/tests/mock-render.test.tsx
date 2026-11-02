@@ -17,8 +17,12 @@ const TITLES = ["도시 모형 상태", "현장 장치 상태", "위험 판단·
 // 사건 없는 구역의 타임라인 칸
 const BLANK = "위험 판단 — 문자 요청(SMS 예정) — 실제 도달(경보) — 선행 시간 —";
 
-// 마크업에서 태그를 빼고 공백을 하나로 줄여 글만 남기는 도우미
-const content = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+// 아이콘 SVG 를 [이름] 글로 바꾸고 태그를 빼 공백을 하나로 줄여 글만 남기는 도우미
+const content = (html: string) =>
+  html
+    .replace(/<svg[^>]*data-icon="([^"]+)"[^>]*>[\s\S]*?<\/svg>/g, " [$1] ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ");
 // 통신 결과와 시각으로 패널을 그려 글만 돌려주는 도우미
 const display = (polled: Feed, now: number | null) =>
   // 화면 고르기 결과를 패널에 넣어 그린 글
@@ -122,12 +126,12 @@ describe("check 9 and the screens", () => {
   it("fills the A timeline and the log with the two mock events", () => {
     const text = display(DOWN, AT);  // 10:01:10 의 mock 장면
     expect(text).toContain(
-      "A 낮은 상가 도로 위험 판단 10:00:41 · △ 주의 문자 요청(SMS 예정) 10:01:01 · " +
+      "A 낮은 상가 도로 위험 판단 10:00:41 · [alert] 주의 문자 요청(SMS 예정) 10:01:01 · " +
         "기록만, 실제 발송 차단 실제 도달(경보) — 선행 시간 —",
     );
     expect(text).toContain(
-      "이벤트 기록 10:01:01 ▲ A 구역 경계 (이전 주의, 한계까지 10 초) " +
-        "10:00:41 △ A 구역 주의 (이전 정상, 한계까지 30 초)",
+      "이벤트 기록 10:01:01 [triangle] A 구역 경계 (이전 주의, 한계까지 10 초) " +
+        "10:00:41 [alert] A 구역 주의 (이전 정상, 한계까지 30 초)",
     );
     expect(text.split(BLANK).length - 1).toBe(2);  // B·C 는 사건 없음
   });
@@ -152,8 +156,8 @@ describe("check 9 and the screens", () => {
   it("fills the plan and the devices but leaves the event panels blank without events", () => {
     const text = display(feed(answer(), AT + 300), AT + 1000);
     // 평면도 구역 목록은 서버 alerts 의 단계
-    expect(text).toContain("A 낮은 상가 도로 · 44.9 mm · ✓ 정상 · 가상 실측");
-    expect(text).toContain("✓ 보호 입력 정상");  // 장치 칸도 서버 상태
+    expect(text).toContain("A 낮은 상가 도로 · 44.9 mm · [check] 정상 · 가상 실측");
+    expect(text).toContain("[check] 보호 입력 정상");  // 장치 칸도 서버 상태
     expect(text.split(BLANK).length - 1).toBe(3);  // 세 구역 모두 빈 칸
     expect(text).toContain("이벤트 기록 —");
   });
@@ -180,7 +184,7 @@ describe("check 9 and the screens", () => {
     const body = answer({ alerts: [{ zone: "B", stage: "caution", etaSec: 30 }] });
     const text = display(feed(body, AT + 300), AT + 1000);  // 그 응답을 그린 글
     expect(text).toContain("B 주택 골목 · 약 30초 후 침수 예상");  // B 침수 예상 문구
-    expect(text).toContain("△ 주의");  // 주의 단계 표시
+    expect(text).toContain("[alert] 주의");  // 주의 단계 표시
   });
 
   // 4초 뒤 마지막 값을 두고 연결 끊김을 알리는지 검사

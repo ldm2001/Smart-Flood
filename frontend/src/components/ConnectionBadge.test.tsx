@@ -36,7 +36,7 @@ describe("Signal", () => {
   });
 
   it("gives each state its own icon next to the text", () => {
-    const icon = (html: string) => html.match(/<span aria-hidden="true">([^<]+)<\/span>/)?.[1];
+    const icon = (html: string) => html.match(/data-icon="([^"]+)"/)?.[1];
     const icons = [
       icon(renderToStaticMarkup(<Signal view="connecting" now={null} receivedAt={null} />)),
       icon(renderToStaticMarkup(<Signal view="server" now={T} receivedAt={T} />)),

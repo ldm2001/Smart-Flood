@@ -22,6 +22,7 @@ import { Plan } from "./CityPlan";
 import { Signal } from "./ConnectionBadge";
 import { Devices } from "./DeviceStatus";
 import { Journal } from "./EventLog";
+import { Glyph } from "./Glyph";
 import { Chart } from "./LevelChart";
 import { Mode } from "./ModeBadge";
 import { Headline } from "./StatusBanner";
@@ -94,36 +95,35 @@ export function Panel(props: Scene & { events?: Events }) {
     : null;
 
   return (
-    <main className="mx-auto w-full max-w-[1800px] px-4 py-6 md:px-8 md:py-8">
+    <main className="mx-auto w-full max-w-[1600px] px-4 py-6 md:px-8 md:py-8">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="eyebrow">A·B·C 구역 침수 모형</p>
-          <h1 className="mt-1 text-3xl font-black tracking-tight">종합 관제</h1>
+          <p className="text-soft">A·B·C 구역 침수 모형</p>
+          <h1 className="mt-1 text-3xl font-semibold">종합 관제</h1>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {// 입력원 표시(mock 이면 가짜 표시)
           }
           <Mode dataSource={snapshot?.dataSource ?? null} mock={props.view === "mock"} />
           <Signal view={props.view} now={data?.now ?? null} receivedAt={data?.receivedAt ?? null} />
           {runState && (
-            <span className="pill">
-              {// 상태 아이콘(낭독기는 건너뜀)
-              }
-              <span aria-hidden="true">{RUN_STATE_ICONS[runState]}</span>
+            <span className="chip">
+              <Glyph name={RUN_STATE_ICONS[runState]} />
               실험 {RUN_STATE_LABELS[runState]}
             </span>
           )}
-          <span className="pill">{snapshot?.experimentId ?? "—"}</span>
-          <span className="text-muted tabular-nums">
+          <span className="font-mono text-muted">{snapshot?.experimentId ?? "—"}</span>
+          <span className="text-muted">
             {// 서버 상태의 기준 시각. 없으면 줄표
             }
-            기준 시각 {snapshot ? clock(Date.parse(snapshot.timestamp)) : "—"}
+            기준 시각{" "}
+            <span className="font-mono text-soft tabular-nums">
+              {snapshot ? clock(Date.parse(snapshot.timestamp)) : "—"}
+            </span>
           </span>
           {expired && (
-            <span className="pill border border-amber bg-transparent text-amber">
-              {// 경고 아이콘(낭독기는 건너뜀)
-              }
-              <span aria-hidden="true">{"⚠︎"}</span>
+            <span className="chip border border-amber bg-transparent text-amber">
+              <Glyph name="clock" />
               예측 만료
             </span>
           )}
@@ -152,7 +152,7 @@ export function Panel(props: Scene & { events?: Events }) {
         predictions={snapshot?.predictions ?? null}
         thresholds={data?.thresholds ?? null}
       />
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
+      <div className="mt-6 grid gap-4 md:grid-cols-[7fr_5fr] md:items-start">
         <Plan snapshot={snapshot} statuses={statuses} thresholds={data?.thresholds ?? null} />
         <Devices snapshot={snapshot} />
       </div>

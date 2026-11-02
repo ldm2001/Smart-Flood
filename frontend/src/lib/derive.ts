@@ -413,3 +413,13 @@ export function pool(
   const height = rect.height * ratio;
   return { y: rect.y + rect.height - height, height };
 }
+
+// 끝에 / 를 붙인 경로. 정적 export 의 trailingSlash 와 같은 꼴
+export function address(path: string): string {
+  return path.endsWith("/") ? path : `${path}/`;
+}
+
+// 이웃한 눈금 사이 가운데 높이. 표척의 작은 눈금 자리
+export function notches(gridlines: readonly { y: number }[]): number[] {
+  return gridlines.slice(1).map((line, i) => (gridlines[i].y + line.y) / 2);
+}

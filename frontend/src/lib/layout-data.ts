@@ -21,11 +21,34 @@ export const STAGE_LABELS: Record<Stage, string> = {  // 4단계 이름표
   evacuate: "침수(경보)",
 };
 
-export const STAGE_ICONS: Record<Stage, string> = {  // 색을 못 봐도 모양으로 구별(이름표와 함께)
-  safe: "✓",  // 정상: 체크
-  caution: "△",  // 주의: 빈 삼각형
-  warning: "▲",  // 경계: 찬 삼각형
-  evacuate: "≋",  // 침수: 물결
+// 한 벌 선 아이콘 이름. 뜻이 아니라 모양으로 붙임(Glyph 가 그림)
+export type Icon =
+  | "check"
+  | "alert"
+  | "triangle"
+  | "waves"
+  | "wave"
+  | "target"
+  | "rotate"
+  | "radio"
+  | "circle"
+  | "pause"
+  | "play"
+  | "stop"
+  | "dots"
+  | "wifi"
+  | "nowifi"
+  | "half"
+  | "ban"
+  | "clock"
+  | "info"
+  | "error";
+
+export const STAGE_ICONS: Record<Stage, Icon> = {  // 색을 못 봐도 모양으로 구별(이름표와 함께)
+  safe: "check",  // 정상: 원 안 체크
+  caution: "alert",  // 주의: 원 안 느낌표
+  warning: "triangle",  // 경계: 삼각형 느낌표
+  evacuate: "waves",  // 침수: 물결 셋
 };
 
 export const MODE_LABELS: Record<Input, string> = {
@@ -34,10 +57,10 @@ export const MODE_LABELS: Record<Input, string> = {
   live: "실측",
 };
 
-export const MODE_ICONS: Record<Input, string> = {
-  sim: "◎",  // 시뮬레이션: 겹동그라미
-  replay: "↺",  // 재생: 되감기 화살표
-  live: "●",  // 실측: 채운 동그라미
+export const MODE_ICONS: Record<Input, Icon> = {
+  sim: "target",  // 시뮬레이션: 과녁
+  replay: "rotate",  // 재생: 되감기 화살표
+  live: "radio",  // 실측: 퍼지는 전파
 };
 
 export const RUN_STATE_LABELS: Record<Run, string> = {  // 위험 단계가 아니라 단계 색 미사용
@@ -46,10 +69,10 @@ export const RUN_STATE_LABELS: Record<Run, string> = {  // 위험 단계가 아�
   stopped: "정지",
 };
 
-export const RUN_STATE_ICONS: Record<Run, string> = {
-  idle: "◇",  // 대기: 빈 마름모
-  running: "▶︎",  // 진행: 재생 삼각형
-  stopped: "■",  // 정지: 네모
+export const RUN_STATE_ICONS: Record<Run, Icon> = {
+  idle: "pause",  // 대기: 세로 두 줄
+  running: "play",  // 진행: 재생 삼각형
+  stopped: "stop",  // 정지: 네모
 };
 
 export const PLAN_VIEW = { width: 300, height: 160 };  // 평면도 viewBox 크기
@@ -109,10 +132,10 @@ export const BLOCKAGE_LABELS: Record<Blockage, string> = {  // 막힘 종류 표
   full: "완전 막힘",
 };
 
-export const BLOCKAGE_ICONS: Record<Blockage, string> = {  // 막힘 종류 아이콘
-  none: "○",
-  partial: "◐",
-  full: "●",
+export const BLOCKAGE_ICONS: Record<Blockage, Icon> = {  // 막힘 종류 아이콘
+  none: "circle",  // 빈 원
+  partial: "half",  // 반 찬 원
+  full: "ban",  // 사선 그은 원
 };
 
-export const HEALTH_ICONS = { ok: "✓", check: "!" } as const;  // 정상·확인 아이콘
+export const HEALTH_ICONS = { ok: "check", check: "alert" } as const;  // 정상·확인 아이콘

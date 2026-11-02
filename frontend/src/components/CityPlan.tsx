@@ -22,6 +22,7 @@ import {
   ZONES,
 } from "@/lib/layout-data";
 import type { Blockage, Snapshot, Zone } from "@/lib/schema";
+import { Glyph } from "./Glyph";
 
 // 평면도가 받는 값. 단계는 서버 alerts 로 구한 값만 씀
 interface Props {
@@ -31,19 +32,19 @@ interface Props {
 }
 
 const RINGS: Record<Blockage, string> = {  // 빗물받이 테두리 색
-  none: "stroke-line",
+  none: "stroke-muted",
   partial: "stroke-amber",
   full: "stroke-(--red)",
 };
 
-const MARKS: Record<Blockage, string> = {  // 빗물받이 번호 글자. 막혔으면 막힘 색에 굵게
+const MARKS: Record<Blockage, string> = {  // 빗물받이 번호 글자. 막혔으면 막힘 색에 한 단 굵게
   none: "text-muted",
-  partial: "font-bold text-amber",
-  full: "font-bold text-(--red)",
+  partial: "font-medium text-amber",
+  full: "font-medium text-(--red)",
 };
 
-const BADGES: Record<Blockage, string> = {  // 막힘 배지의 테두리와 글자 색
-  none: "border-line text-muted",
+const BADGES: Record<Blockage, string> = {  // 막힘 칩의 테두리와 글자 색. 막힘 없으면 칩 기본색
+  none: "border-line",
   partial: "border-amber text-amber",
   full: "border-(--red) text-(--red)",
 };
@@ -64,7 +65,7 @@ export function Plan({ snapshot, statuses, thresholds }: Props) {
   const blocked = (id: string) => (snapshot ? obstruction(snapshot.blockage, id) : null);
   return (
     <section aria-label="도시 모형 상태" className="panel p-5">
-      <h2 className="mb-4 text-xl font-bold">도시 모형 상태</h2>
+      <h2 className="mb-4 text-lg font-medium">도시 모형 상태</h2>
       {// 15/8 은 viewBox 300/160 과 같은 비율이라 겹친 글자와 그림이 맞음
       }
       <div role="img" aria-label="도시 모형 평면도" className="relative aspect-[15/8] w-full">
@@ -92,13 +93,13 @@ export function Plan({ snapshot, statuses, thresholds }: Props) {
                 />
               );
             })}
-          {// 구역 칸. 테두리는 서버 단계 색, 단계를 모르면 선 색
+          {// 구역 칸. 테두리는 주의 이상만 서버 단계 색, 그 밖에는 보조 글자색
           }
           {ZONE_IDS.map((id) => (
             <rect
               key={id}
               data-stage={statuses?.[id].stage}
-              className="fill-none stroke-(--stage,var(--line)) stroke-2"
+              className="fill-none stroke-(--alert,var(--muted)) stroke-2"
               vectorEffect="non-scaling-stroke"
               {...PLAN_ZONES[id]}
             />
@@ -148,12 +149,12 @@ export function Plan({ snapshot, statuses, thresholds }: Props) {
           <span
             key={id}
             data-zone={id}
-            className={`${CENTER} flex items-center gap-1 font-bold text-(--zone)`}
+            className={`${CENTER} flex items-center gap-1 font-medium`}
             style={spot(PLAN_ZONES[id].x + PLAN_ZONES[id].width / 2, LABEL_Y)}
           >
             {id}
             {snapshot?.zones[id].source === "estimated" && (
-              <span className="pill text-base">추정</span>
+              <span className="chip">추정</span>
             )}
           </span>
         ))}
@@ -168,12 +169,12 @@ export function Plan({ snapshot, statuses, thresholds }: Props) {
         ))}
       </div>
 
-      {// 막힘 배지. 글은 서버가 준 막힘 이름
+      {// 막힘 칩. 글은 서버가 준 막힘 이름
       }
       {snapshot && (
         <div className="mt-4">
-          <p className={`pill border bg-transparent text-lg ${BADGES[snapshot.blockage.type]}`}>
-            <span aria-hidden="true">{BLOCKAGE_ICONS[snapshot.blockage.type]}</span>
+          <p className={`chip border ${BADGES[snapshot.blockage.type]}`}>
+            <Glyph name={BLOCKAGE_ICONS[snapshot.blockage.type]} />
             {snapshot.blockage.label}
           </p>
         </div>
@@ -188,7 +189,7 @@ export function Plan({ snapshot, statuses, thresholds }: Props) {
                 "—"
               ) : (
                 <>
-                  <span aria-hidden="true">{BLOCKAGE_ICONS[kind]}</span>
+                  <Glyph name={BLOCKAGE_ICONS[kind]} />
                   {` ${BLOCKAGE_LABELS[kind]}`}
                 </>
               )}
@@ -206,7 +207,11 @@ export function Plan({ snapshot, statuses, thresholds }: Props) {
               {zone && grade ? (
                 <>
                   {`${figure(zone.levelMm, thresholds?.[id] ?? null)} mm · `}
-                  <span aria-hidden="true">{STAGE_ICONS[grade.stage]}</span>
+                  {// 단계 아이콘만 단계 색
+                  }
+                  <span data-stage={grade.stage} className="text-(--stage)">
+                    <Glyph name={STAGE_ICONS[grade.stage]} />
+                  </span>
                   {` ${STAGE_LABELS[grade.stage]} · ${SOURCE_LABELS[zone.source]}`}
                 </>
               ) : (
@@ -217,13 +222,13 @@ export function Plan({ snapshot, statuses, thresholds }: Props) {
         })}
       </ul>
 
-      <h3 className="mt-4 text-lg font-bold">하부 배수 계량</h3>
+      <h3 className="mt-4 font-medium">하부 배수 계량</h3>
       <dl className="mt-2 grid grid-cols-2 gap-2">
         {METERS.map(({ name, key, unit }) => (
           <div key={key} className="rounded-lg border border-line px-3 py-2">
             <dt className="text-muted">{name}</dt>
             <dd>
-              <span className="text-key font-bold tabular-nums">
+              <span className="text-key font-medium tabular-nums">
                 {snapshot ? snapshot.drain[key].toFixed(2) : "—"}
               </span>
               {snapshot && <small className="ml-1 text-base text-muted">{unit}</small>}
