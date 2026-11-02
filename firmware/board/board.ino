@@ -50,6 +50,7 @@ const char* DEVICE_ID = "esp32_1";    // backend/config.yaml devices.allowed 에
 // backend/config.yaml sensors.A.install_height_mm 와 같은 값. 서버는 거리를 받으므로
 // 거리 = 이 값 - 수위 로 바꿔 보냄
 const float INSTALL_HEIGHT_MM = 600.0f;
+const unsigned long REJOIN_MS = 10000;  // 와이파이가 끊긴 채면 이 간격으로 다시 붙어 봄
 
 // ===== 수위센서 =====
 // 0~5000 mm 가 4~20 mA 이고 변환보드 120 Ω 에서 2.604 mm/mV, 0 mm 에서 480 mV
@@ -120,6 +121,7 @@ int logN = 0;
 String pendingPush = "";
 String bootId;
 uint32_t seqNo = 0;
+int sendCode = 1;  // 마지막으로 찍은 전송 결과. HTTP 코드, 음수는 오류, 0 은 주소 틀림, 1 은 없음
 
 // ===== 릴레이 =====
 // 릴레이를 켜거나 끔. 끌 때 RELAY_OFF_HIGHZ 면 핀을 입력으로 풀어 모듈의 풀업이 끄게 함
@@ -347,13 +349,49 @@ void newRun() {
 }
 
 // ===== 네트워크 =====
+// 1초마다: 와이파이 연결이 바뀌면 시리얼에 찍음(SSID 는 찍지 않음). 끊긴 뒤 10초는 코어의 자동
+// 재접속에 맡기고, 그 뒤로는 REJOIN_MS 마다 다시 붙어 봄. 부팅 때 공유기가 없던 경우도 같음
+void watchWifi() {
+  if (!*STA_SSID) return;
+  static int was = -1;             // 지난번 연결 여부. -1 은 아직 모름
+  static unsigned long tried = 0;  // 끊김을 보거나 다시 붙어 본 시각
+  bool up = WiFi.status() == WL_CONNECTED;
+  if (up != was) {
+    was = up;
+    tried = millis();
+    sendCode = 1;  // 다시 붙은 뒤 첫 전송 결과를 다시 찍음
+    if (up) Serial.println("와이파이 연결: " + WiFi.localIP().toString());
+    else Serial.println("와이파이 연결 안 됨. 10초마다 다시 붙어 봄");
+  }
+  if (!up && millis() - tried >= REJOIN_MS) {
+    tried = millis();
+    WiFi.reconnect();
+  }
+}
+
+// 전송 결과가 지난번과 다를 때만 시리얼에 찍음
+void logSend(int code) {
+  if (code == sendCode) return;
+  sendCode = code;
+  if (code > 0) Serial.printf("서버 전송 HTTP %d\n", code);
+  else if (code == 0) Serial.println("서버 주소를 읽지 못함. SERVER_URL 은 http://IP:8000 꼴");
+  else Serial.println("서버 전송 실패: " + HTTPClient::errorToString(code));
+}
+
 // 1초마다: 수위를 서버 메시지 모양(distA_mm 는 설치 높이 - 수위)으로 보냄. 이상이면 null 과 fault
 void sendIngest() {
   if (!*SERVER_URL || WiFi.status() != WL_CONNECTED) return;
+  size_t n = strlen(SERVER_URL);
+  while (n > 0 && SERVER_URL[n - 1] == '/') n--;  // 끝의 / 를 빼고 붙여 //api 가 되지 않음
+  char url[200];
+  snprintf(url, sizeof(url), "%.*s/api/ingest", (int)n, SERVER_URL);
   HTTPClient http;
   http.setTimeout(400);
   http.setConnectTimeout(400);  // 서버가 꺼져 있어도 안전 루프(100 ms)를 오래 막지 않음
-  if (!http.begin(String(SERVER_URL) + "/api/ingest")) return;
+  if (!http.begin(String(url))) {
+    logSend(0);
+    return;
+  }
   http.addHeader("Content-Type", "application/json");
   char body[320];
   snprintf(body, sizeof(body),
@@ -363,7 +401,7 @@ void sendIngest() {
            DEVICE_ID, bootId.c_str(), (unsigned long)seqNo++, (unsigned long)millis(),
            fault ? "null" : String(INSTALL_HEIGHT_MM - levelMm, 1).c_str(),
            fault ? "fault" : "ok");
-  http.POST((uint8_t*)body, strlen(body));
+  logSend(http.POST((uint8_t*)body, strlen(body)));
   http.end();
 }
 
@@ -572,6 +610,7 @@ void loop() {
     predict();
     Serial.printf("t=%.0f lv=%.1fmm rate=%.2fmm/min eta A=%.0f B=%.0f C=%.0f pump=%d\n",
                   elapsedS(), levelMm, rate * 60, eta[0], eta[1], eta[2], pumpOn);
+    watchWifi();
     sendIngest();
     sendPush();
   }
