@@ -61,12 +61,12 @@ echo 'NEXT_PUBLIC_API_BASE=http://localhost:8000' > .env.development.local
 
 | 경로 | 내용 |
 |---|---|
-| `src/app/layout.tsx` | 공통 틀: 메뉴, 하단 시험용 고지 |
+| `src/app/layout.tsx` | 공통 틀: 로고와 메뉴(넓으면 왼쪽, 좁으면 위), 하단 시험용 고지 |
 | `src/app/page.tsx` | `/` 종합 관제 |
 | `src/app/ops/page.tsx` | `/ops/` 운영·설정 (S3 에서 채운다) |
 | `src/app/logs/page.tsx` | `/logs/` 기록·재생 (S4 에서 채운다) |
-| `src/app/icon.svg` | 탭 아이콘. 머리글의 ≋ 표시와 같은 모양이다. SVG 는 XML 이라 주석에 `--` 를 쓰면 그림이 깨진다 |
-| `src/components/` | 화면 조각. 파일 이름과 내보내는 이름이 다르다. `MonitorView.tsx`(종합 관제 화면)는 `Monitor`, `StatusBanner.tsx` 는 `Headline`, `ZoneGauge.tsx` 는 `Gauge`, `LevelChart.tsx` 는 `Chart`, `ModeBadge.tsx` 는 `Mode`, `ConnectionBadge.tsx` 는 `Signal`, `CityPlan.tsx`("도시 모형 상태" 칸)는 `Plan`, `DeviceStatus.tsx`("현장 장치 상태" 칸)는 `Devices`, `AlertTimeline.tsx`("위험 판단·시험용 문자" 칸)는 `Timeline`, `EventLog.tsx`("이벤트 기록" 칸)는 `Journal` 을 내보낸다. S2 의 네 칸은 같은 이름의 `.test.tsx` 를 옆에 둔다 |
+| `src/app/icon.svg` | 탭 아이콘. 머리글 로고의 물결과 같은 모양이다. SVG 는 XML 이라 주석에 `--` 를 쓰면 그림이 깨진다 |
+| `src/components/` | 화면 조각. 파일 이름과 내보내는 이름이 다르다. `MonitorView.tsx`(종합 관제 화면)는 `Monitor`, `StatusBanner.tsx` 는 `Headline`, `ZoneGauge.tsx` 는 `Gauge`, `LevelChart.tsx` 는 `Chart`, `ModeBadge.tsx` 는 `Mode`, `ConnectionBadge.tsx` 는 `Signal`, `CityPlan.tsx`("도시 모형 상태" 칸)는 `Plan`, `DeviceStatus.tsx`("현장 장치 상태" 칸)는 `Devices`, `AlertTimeline.tsx`("위험 판단·시험용 문자" 칸)는 `Timeline`, `EventLog.tsx`("이벤트 기록" 칸)는 `Journal` 을 내보낸다. `Glyph.tsx` 는 화면 전체가 쓰는 선 아이콘 한 벌(18px, 선 1.5, 색은 글자색), `Menu.tsx` 는 지금 쪽을 표시하는 메뉴다. S2 의 네 칸은 같은 이름의 `.test.tsx` 를 옆에 둔다 |
 | `src/lib/schema.ts` | `/api/state` zod 스키마. 백엔드 계약(`docs/api-contract.md`)과 같은 제약. 기록 사건 응답(`/api/logs/{id}/events`)의 스키마와 검사 함수 `chronicle` 도 둔다 |
 | `src/lib/api.ts` | `fetch` 래퍼. 기본 5초 제한, `/api/state` 는 3초. 응답을 받은 시각을 함께 돌려준다. `logbook` 은 기록 사건을 읽고, 기록이 없어 404 면 빈 목록을 돌려준다 |
 | `src/lib/useSnapshot.ts` | `/api/state` 1초 폴링(SWR)과 수위 이력(최근 600개), `/api/config` 한계 수위 |
@@ -123,7 +123,9 @@ postbuild 검사는 6번 외에 세 가지를 더 본다. 세 화면 모두에 �
 
 루트 `CLAUDE.md` 의 frontend 절을 따른다. 계산할 수 있는 값은 state 로 두지 않고 렌더 중에 계산한다. 시간은 `useNow()` 로만 읽는다. 상태 관리 라이브러리, UI 키트, 차트 라이브러리, `next/image`, 동적 라우트, 서버 기능은 쓰지 않는다.
 
-핵심 수치(지시서 6장: 28px 이상)는 현재 수위(48px, `text-5xl`), 한계 대비 %와 도달까지 남은 초(28px, `tokens.css` 의 `text-key`)다. 구역은 색만으로 구분하지 않는다. 카드 제목에 구역 글자를 쓰고, 차트는 선 끝에 구역 글자를 붙인다. 차트의 한계 라벨은 왼쪽 끝에 모은다.
+핵심 수치(지시서 6장: 28px 이상)는 현재 수위(32px, `tokens.css` 의 `text-figure`), 한계 대비 %와 도달까지 남은 초(28px, `text-key`)다. 구역은 색만으로 구분하지 않는다. 카드 제목에 구역 글자를 쓰고, 차트는 선 끝에 구역 글자를 붙인다. 차트의 한계 라벨은 왼쪽 끝에 모은다.
+
+색은 위험 단계와 연결·막힘·장치 같은 상태를 알릴 때만 쓰고, 구역 색은 수위 차트에만 쓴다. 아이콘은 `Glyph` 한 벌만 쓰고 글자 기호를 아이콘으로 쓰지 않는다. 글자는 16px 이상, 굵기는 400·500(쪽 제목과 로고 600)이고 시각·실험 번호·눈금 숫자는 고정폭(`font-mono`)이다.
 
 한글은 어절 단위로 줄을 바꾼다. `globals.css` 의 `html` 에 `word-break: keep-all` 과 `overflow-wrap: break-word` 를 두어, 한 줄보다 긴 낱말만 중간에서 끊긴다. 좁은 칸에 긴 낱말을 넣을 때는 폭 390px 에서 넘치지 않는지 본다.
 
