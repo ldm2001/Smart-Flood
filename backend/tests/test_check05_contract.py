@@ -287,6 +287,7 @@ def test_api_output_keeps_every_example_field(dossier):
 def test_api_output_always_carries_the_added_fields(dossier, config):
     for body in dossier:
         assert body["runState"] in ("idle", "running", "stopped")
+        assert body["notifier"] == {"mode": "stub", "armed": False}  # 기본은 stub·해제
         meta = body["predictionMeta"]
         assert meta["basisTime"] == body["timestamp"]
         assert meta["basisElapsedSec"] == body["elapsedSec"]

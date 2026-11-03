@@ -5,7 +5,9 @@ from app.schemas import (
     Clog,
     Feed,
     Kickoff,
+    Latch,
     Message,
+    Probe,
     Receipt,
     Shower,
 )
@@ -67,3 +69,17 @@ async def channel(service: ServiceDep, body: Feed) -> Board:
 async def intake(service: ServiceDep, body: Message) -> Receipt:
     service.intake(body.model_dump())
     return Receipt(deviceId=body.deviceId, seq=body.seq, dataSource=service.snapshot.data_source)
+
+
+@router.post("/notifier/arm", response_model=Board)
+# 실제 발송을 무장·해제(켤 때만 재생·mode·환경 변수를 봄)
+async def latch(service: ServiceDep, body: Latch) -> Board:
+    service.arm(body.armed)
+    return Board.snapshot(service.snapshot)
+
+
+@router.post("/notifier/test", response_model=Probe)
+# 시험 문자 한 건. async 가 아니라 스레드에서 돌아 보내는 동안 tick 을 막지 않음
+def probe(service: ServiceDep, body: Blank | None = None) -> Probe:
+    to, text = service.trial()
+    return Probe(to=to, body=text)

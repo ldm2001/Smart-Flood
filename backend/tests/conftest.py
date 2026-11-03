@@ -1,9 +1,80 @@
+import ipaddress
 import pytest
+import socket
+from app.adapters.solapi import NAMES
 from pathlib import Path
 from tests.helpers import START
 
 # 설정 파일 config.yaml 의 경로(backend 폴더 안)
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
+
+
+# 시험 중 바깥 네트워크 연결이 막혔을 때 나는 오류(OSError 라 기존 연결 오류 처리와 같음)
+class Offline(OSError):
+    pass
+
+
+# 같은 컴퓨터 주소인지(127.x·::1·localhost·빈 주소)
+def nearby(host) -> bool:
+    if host is None:
+        return True
+    name = host.decode() if isinstance(host, bytes) else str(host)
+    if name.lower() in ("", "localhost", "localhost."):
+        return True
+    try:
+        address = ipaddress.ip_address(name.split("%")[0])  # IPv6 범위 표시 제거
+    except ValueError:
+        return False  # 그 밖의 이름은 바깥으로 봄
+    return address.is_loopback or address.is_unspecified
+
+
+@pytest.fixture(autouse=True)
+# 바깥 네트워크 연결을 막는 준비물. 같은 컴퓨터 주소와 AF_UNIX 만 허용
+def offline(monkeypatch):
+    connect, connect_ex = socket.socket.connect, socket.socket.connect_ex
+    getaddrinfo, gethostbyname = socket.getaddrinfo, socket.gethostbyname
+
+    # 연결 대상이 허용 범위인지 검사, 아니면 Offline
+    def check(sock, address):
+        if sock.family == getattr(socket, "AF_UNIX", None):
+            return
+        host = address[0] if isinstance(address, tuple) else address
+        if not nearby(host):
+            raise Offline(f"시험 중 바깥 연결 차단: {host}")
+
+    # socket.connect 대역
+    def guarded(sock, address):
+        check(sock, address)
+        return connect(sock, address)
+
+    # socket.connect_ex 대역
+    def guarded_ex(sock, address):
+        check(sock, address)
+        return connect_ex(sock, address)
+
+    # socket.getaddrinfo 대역
+    def lookup(host, *args, **kwargs):
+        if not nearby(host):
+            raise Offline(f"시험 중 이름 풀이 차단: {host}")
+        return getaddrinfo(host, *args, **kwargs)
+
+    # socket.gethostbyname 대역
+    def resolve(host):
+        if not nearby(host):
+            raise Offline(f"시험 중 이름 풀이 차단: {host}")
+        return gethostbyname(host)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded)
+    monkeypatch.setattr(socket.socket, "connect_ex", guarded_ex)
+    monkeypatch.setattr(socket, "getaddrinfo", lookup)
+    monkeypatch.setattr(socket, "gethostbyname", resolve)
+
+
+@pytest.fixture(autouse=True)
+# 셸에 불러온 발송 환경 변수를 시험마다 지우는 준비물. 실제 키·번호가 시험에 섞이지 않게
+def keyless(monkeypatch):
+    for name in NAMES:
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(scope="session")

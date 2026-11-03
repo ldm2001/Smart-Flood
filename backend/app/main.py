@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from app.adapters import solapi
 from app.adapters.clock import Wall
+from app.adapters.dispatch import Dispatch
 from app.adapters.jsonl_log import Jsonl
 from app.adapters.sim_source import Sim
 from app.api import control, logs, state
@@ -12,6 +15,7 @@ from app.ports.notifier import Notifier
 from app.ports.source import Source
 from app.schemas import encoding
 from app.service import (
+    Bounce,
     Conflict,
     Experiment,
     Fault,
@@ -47,7 +51,7 @@ def factory(
         clock=Wall() if clock is None else clock,  # 시계: 안 주면 진짜 시계
         source=Sim(config) if source is None else source,  # 입력원: 안 주면 가상 센서
         experiment_log=Jsonl() if experiment_log is None else experiment_log,  # 기록: 안 주면 JSONL
-        notifier=notifier,
+        notifier=messenger(config) if notifier is None else notifier,  # 알림: 안 주면 디스패치
     )
 
     @asynccontextmanager
@@ -86,6 +90,12 @@ def factory(
     async def conflict(request: Request, error: Conflict) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(error)})
 
+    @app.exception_handler(Bounce)  # 시험 문자 발송 실패(Bounce) 처리기
+    # 발송 실패를 502 응답으로 변환(글은 예외 종류만)
+    async def bounce(request: Request, error: Bounce) -> JSONResponse:
+        detail = f"시험 문자를 보내지 못했다: {error}"  # 예: "시험 문자를 보내지 못했다: Refusal"
+        return JSONResponse(status_code=502, content={"detail": detail})
+
     @app.exception_handler(Outage)  # 입출력 장애(Outage) 처리기
     # 장애를 503 응답으로 변환
     async def outage(request: Request, error: Outage) -> JSONResponse:
@@ -97,6 +107,14 @@ def factory(
     if static_dir is not None and Path(static_dir).is_dir():
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="front")  # API 경로 뒤에
     return app
+
+
+# 기본 알림: config 의 notifier.mode, 환경 변수의 키, Solapi 발송(키가 없으면 보내는 쪽 없음)
+def messenger(config: dict) -> Dispatch:
+    cfg = config["notifier"]
+    keys = solapi.keys(os.environ)
+    sender = None if keys is None else solapi.Solapi(keys, timeout_s=float(cfg["timeout_s"]))
+    return Dispatch(cfg, keys, sender)
 
 
 # 밀린 tick 을 하나씩 처리하고 다음 tick 까지 잠
