@@ -652,6 +652,7 @@ class Experiment:
             quality=self.grade(elapsed_s, latest, absent),
             thresholds_m=self._rule.thresholds_m,
             alerts=bulletin(watch),
+            notifier=self.alarm(),  # 그 tick 의 방식·무장(기록 state 줄도 응답과 같게)
         )
 
     # 단계 전환 사건 한 줄. 도달 초(올림한 정수)가 0 이면 "한계 도달", 안 오르면 생략

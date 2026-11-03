@@ -234,6 +234,22 @@ def test_arm_and_the_test_message(builder, config, clock):
     assert client.post(TEST_URL).status_code == 409
 
 
+# 기록의 state 줄도 그 tick 의 방식·무장을 담음(계약: state 줄은 그 tick 의 응답 전체)
+def test_the_state_line_records_the_notifier_of_its_tick(builder, config, clock, journal):
+    client = builder(notifier=Dispatch(settings(config), KEYS, Phone(), runner=direct))
+    service = client.app.state.service
+    client.post("/api/experiment/start", json={"rain": "heavy"})
+    lapse(clock, service, 1)
+    client.post(ARM_URL, json={"armed": True})
+    lapse(clock, service, 1)
+    experiment = client.get(STATE_URL).json()["experimentId"]
+    lines = [r["state"] for r in journal.records(experiment) if r["type"] == "state"]
+    assert [line["notifier"] for line in lines] == [
+        {"mode": "sms", "armed": False},
+        {"mode": "sms", "armed": True},
+    ]
+
+
 # 시험 문자를 보내지 못하면 502(예외 종류만)
 def test_a_failed_test_message_is_502(builder, config):
     client = builder(notifier=Dispatch(settings(config), KEYS, Phone(fail=True), runner=direct))
