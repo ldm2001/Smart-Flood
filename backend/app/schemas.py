@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from app.core.model import ZONES
 from datetime import datetime, timedelta
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictBool
 from typing import TYPE_CHECKING, Annotated, Literal
 
 if TYPE_CHECKING:  # 타입 검사할 때만 읽음(순환 참조 방지)
@@ -136,6 +136,12 @@ class Meta(Response):
     assumptions: Assumptions  # 예측이 가정한 조건
 
 
+# 알림 상태(추가 필드). armed 가 true 일 때만 실제 발송
+class Alarm(Response):
+    mode: Literal["stub", "sms"]  # 발송 방식(config.yaml notifier.mode)
+    armed: bool  # 실제 발송 무장 여부(서버를 켜면 false)
+
+
 # /api/state 전체 응답(4.1)
 class Board(Response):
     experimentId: str  # 실험 회차 ID
@@ -154,6 +160,7 @@ class Board(Response):
     alerts: list[Alert]  # 경보 목록
     runState: Literal["idle", "running", "stopped"] | None = None  # 추가 필드(회차 진행 상태)
     predictionMeta: Meta | None = None  # 추가 필드: 예측 메타 정보
+    notifier: Alarm | None = None  # 추가 필드: 알림 방식·무장(서버 응답에는 늘 있음)
 
     @classmethod  # 클래스 메서드(인스턴스 없이 부름)
     # 서비스 스냅샷을 API 응답으로 변환(단위는 mm·L·L/min)
@@ -199,6 +206,7 @@ class Board(Response):
                 "dataSource": s.data_source,
                 "alerts": list(s.alerts),
                 "runState": s.run_state,
+                "notifier": {"mode": s.notifier[0], "armed": s.notifier[1]},
                 "predictionMeta": {
                     "basisTime": timestamp,
                     "basisElapsedSec": p.basis_elapsed_s,
@@ -247,6 +255,17 @@ class Feed(Request):
 # 내용 없는 요청
 class Blank(Request):
     pass
+
+
+# 실제 발송 무장·해제 요청
+class Latch(Request):
+    armed: StrictBool  # true 면 무장, false 면 해제
+
+
+# 시험 문자 응답
+class Probe(Response):
+    to: str  # 받은 번호(뒤 4자리만 보임)
+    body: str  # 보낸 본문
 
 
 

@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import pytest
+from app.adapters.stub import Stub
 from datetime import timedelta
 from tests.helpers import START, Mailbox, Script, chronicle, footage, lapse, readout
 
@@ -173,7 +174,7 @@ def test_each_stage_change_leaves_a_stage_event(voyage, journal, timing):
 def test_the_notifier_gets_every_stage_change_once(voyage, journal, mailbox):
     events = [r for r in journal.records(ID) if r["type"] == "event"]
     assert len(events) == 4
-    assert mailbox.events == events
+    assert mailbox.events == [{**e, "experimentId": ID} for e in events]  # 실험 ID 를 붙여 받음
 
 
 # 이벤트 조회 API 가 stage 이벤트를 기록 순서대로 주는지 검사
@@ -243,7 +244,7 @@ def test_a_failing_notifier_keeps_the_run_going(builder, clock, cfg, journal, ti
 
 # 기본 알림(Stub)이 단계 전환마다 사건 글을 WARNING 으로 남기는지 검사. uvicorn 기본 설정에서도 보임
 def test_the_stub_warns_each_stage_change(builder, clock, cfg, journal, timing, caplog):
-    client = builder(cfg, source=Script(None))
+    client = builder(cfg, source=Script(None), notifier=Stub())  # 앱 기본은 디스패치
     answer(client, START_URL, B_BLOCKED)
     answer(client, RAIN_URL, {"mmPerHour": RAIN_MM_PER_H})
     lapse(clock, client.app.state.service, timing["evacuate"])

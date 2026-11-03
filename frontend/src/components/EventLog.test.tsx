@@ -5,7 +5,12 @@ import type { LogEvent } from "@/lib/schema";
 import type { Events } from "@/lib/useEvents";
 import { Journal } from "./EventLog";
 
-const content = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+// 아이콘 SVG 를 [이름] 글로 바꾸고 태그를 빼 공백을 하나로 줄여 글만 남기는 도우미
+const content = (html: string) =>
+  html
+    .replace(/<svg[^>]*data-icon="([^"]+)"[^>]*>[\s\S]*?<\/svg>/g, " [$1] ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ");
 const T0 = Date.UTC(2026, 9, 22, 1, 0, 0);  // 회차 시작 시각(2026-10-22 10:00 KST)
 const FAULT: LogEvent = {  // 계산 오류 사건(154초)
   type: "event",
@@ -14,7 +19,7 @@ const FAULT: LogEvent = {  // 계산 오류 사건(154초)
   time: "2026-10-22T10:02:34.123456+09:00",
   message: "Underflow: A 저장량이 -0.001 m³ 다",
 };
-const FAILURE = "! 이벤트를 읽지 못했습니다.";
+const FAILURE = "[error] 이벤트를 읽지 못했습니다";
 
 // 경과 e 초의 A 구역 주의 사건
 function caution(e: number, message = `A 구역 주의 (이전 정상, 한계까지 ${e} 초)`): LogEvent {
@@ -42,15 +47,15 @@ describe("Journal", () => {
     expect(text.indexOf("10:00:31")).toBeLessThan(text.indexOf("10:00:30"));
     expect(text).toContain("10:00:02");
     expect(text).not.toContain("10:00:01");  // 가장 오래된 사건은 빠짐
-    expect(text).toContain("10:00:31 △ A 구역 주의 (이전 정상, 한계까지 31 초)");
+    expect(text).toContain("10:00:31 [alert] A 구역 주의 (이전 정상, 한계까지 31 초)");
     expect(html).toContain(
-      '<span aria-hidden="true" data-stage="caution" class="text-(--stage)">△</span>',
+      '<span data-stage="caution" class="text-(--stage)"><svg aria-hidden="true" data-icon="alert"',
     );
   });
 
   it("marks a calculation error row", () => {
     const text = content(draw({ list: [caution(1), FAULT], failed: false }));
-    expect(text).toContain("10:02:34 ! 계산 오류 Underflow: A 저장량이 -0.001 m³ 다");
+    expect(text).toContain("10:02:34 [error] 계산 오류 Underflow: A 저장량이 -0.001 m³ 다");
     expect(text.indexOf("10:02:34")).toBeLessThan(text.indexOf("10:00:01"));
   });
 
@@ -74,14 +79,14 @@ describe("Journal", () => {
 
   it("shows the waiting, loading, failed and empty states", () => {
     expect(content(draw(null))).toContain("이벤트 기록 —");
-    expect(content(draw({ list: null, failed: false }))).toContain("이벤트를 읽는 중입니다.");
+    expect(content(draw({ list: null, failed: false }))).toContain("이벤트를 읽는 중입니다");
     const failed = content(draw({ list: null, failed: true }));
     expect(failed).toContain(FAILURE);
     expect(failed).not.toContain("읽는 중");
-    expect(content(draw({ list: [], failed: false }))).toContain("표시할 이벤트가 없습니다.");
+    expect(content(draw({ list: [], failed: false }))).toContain("표시할 이벤트가 없습니다");
     const empty = content(draw({ list: [], failed: true }));
     expect(empty).toContain(FAILURE);
-    expect(empty).toContain("표시할 이벤트가 없습니다.");
+    expect(empty).toContain("표시할 이벤트가 없습니다");
     expect(content(draw({ list: [], failed: false }))).not.toContain("!");
   });
 });

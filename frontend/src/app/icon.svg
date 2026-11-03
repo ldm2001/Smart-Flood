@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- 탭 아이콘. 머리글의 ≋ 표시와 같은 모양이고, 색은 tokens.css 의 brandmark·brandmark-ink 변수 값이다. -->
-  <rect width="32" height="32" rx="7" fill="#133f70"/>
-  <path d="M6.5 10.5q2.375-3.4 4.75 0t4.75 0 4.75 0 4.75 0M6.5 16q2.375-3.4 4.75 0t4.75 0 4.75 0 4.75 0M6.5 21.5q2.375-3.4 4.75 0t4.75 0 4.75 0 4.75 0" fill="none" stroke="#77c6ff" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- 탭 아이콘. 머리글 로고의 물결과 같은 모양. 바탕은 panel 색, 선은 brand 색 -->
+  <rect width="32" height="32" rx="7" fill="#11141c"/>
+  <path d="M5 16q2.75-3 5.5 0t5.5 0 5.5 0 5.5 0" fill="none" stroke="#5aa9f0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

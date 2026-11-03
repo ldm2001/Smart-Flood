@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { ZONE_IDS, type Thresholds } from "./derive";
+import { MAX_THRESHOLD_MM, ZONE_IDS, type Thresholds } from "./derive";
 
 // 구역 한계 수위 설정. 저장 키·모양·검증 규칙을 담음
 export interface Settings {
@@ -7,7 +7,6 @@ export interface Settings {
 }
 
 export const SETTINGS_KEY = "smartFloodSettings";  // 브라우저 저장소 키
-const MAX_THRESHOLD_MM = 500;  // 한계 수위 상한(mm). 상태 응답의 수위 상한과 같음
 
 export const DEFAULT_SETTINGS: Settings = Object.freeze({ thresholds: Object.freeze({ A: 45, B: 55, C: 65 }) });
 

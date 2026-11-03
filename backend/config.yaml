@@ -32,5 +32,11 @@ sensors:                     # ASSUMED 설치 높이·영점·배율·측정 범
   B: {install_height_mm: 600, zero_offset_mm: 0, scale: 1.0, min_range_mm: 200, max_range_mm: 650}
   load: {tare_g: 0}          # ASSUMED
 sim: {truth_perturbation: 0.15, noise_mm: 0.8, seed: 20261022}   # ASSUMED
+notifier:                    # 문자 알림. 키·번호는 여기 두지 않고 환경 변수에만
+  mode: stub                 # stub 은 보내지 않음. sms 는 환경 변수 4개와 무장이 함께 맞아야 보냄
+  max_sms_per_experiment: 10 # 실험당 발송 상한(사건 건수)
+  sms_stages: [warning, evacuate]   # 문자를 보낼 단계. caution 은 화면·로그만
+  timeout_s: 5               # 발송 요청 제한 시간(초), 재시도 없음
+  test_limit: 3              # 시험 문자 상한(서버 실행당)
 server:
   cors_origins: ["http://localhost:3000"]   # Next dev

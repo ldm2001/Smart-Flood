@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
+import { Archive, Waiting } from "@/components/LogsView";
 
 export const metadata: Metadata = { title: "기록·재생" };  // 탭 제목(Next 가 읽는 고정 이름)
 
-// 기록·재생 화면. S4 에서 기록 목록·상세·재생 시작을 붙임
+// 기록·재생 화면. 주소의 ?id= 는 브라우저에서만 읽어 Suspense 로 감쌈
 export default function Logs() {
   return (
-    <main className="mx-auto w-full max-w-[1800px] px-4 py-6 md:px-8 md:py-8">
-      <h1 className="text-3xl font-black tracking-tight">기록·재생</h1>
-      <p className="mt-3 text-muted">실험 기록 목록과 재생 화면은 다음 단계(S4)에서 붙습니다.</p>
-    </main>
+    <Suspense fallback={<Waiting />}>
+      <Archive />
+    </Suspense>
   );
 }

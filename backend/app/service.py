@@ -35,7 +35,7 @@ from app.ports.experiment_log import (
     Flaw,
     Journal,
 )
-from app.ports.notifier import Notifier
+from app.ports.notifier import Notifier, Spent, Switch
 from app.ports.source import Source
 from app.schemas import (
     CONTRACT_HORIZONS_S,
@@ -81,6 +81,11 @@ class Conflict(RuntimeError):
     pass
 
 
+# 시험 문자를 보내지 못함(502). 글은 예외 종류만
+class Bounce(RuntimeError):
+    pass
+
+
 # 실험 기록을 쓸 수 없음(503)
 class Outage(RuntimeError):
     pass
@@ -110,6 +115,7 @@ class Snapshot:
     quality: str  # 데이터 품질
     thresholds_m: dict[str, float]  # 구역별 한계 수위(m)
     alerts: tuple = ()  # 경보 목록
+    notifier: tuple[str, bool] = ("stub", False)  # 알림 (발송 방식, 무장 여부)
 
 
 # 실험 런타임. fastapi 를 모르고 내부 단위는 SI
@@ -175,9 +181,10 @@ class Experiment:
     @property  # 속성처럼 읽음(조회)
     # 최근 스냅샷. live 의 장치 상태는 읽는 때로 새로 봄(대기 중에는 tick 이 없음)
     def snapshot(self) -> Snapshot:
+        snapshot = self._snapshot
         if self._data_source == "live":
-            return replace(self._snapshot, devices=self.roster())
-        return self._snapshot
+            snapshot = replace(snapshot, devices=self.roster())
+        return replace(snapshot, notifier=self.alarm())  # 무장은 tick 사이에도 바뀜
 
     @property
     # 모델 상태
@@ -560,7 +567,7 @@ class Experiment:
         if self._replay is None:  # 재생 중에는 알리지 않음(알림 포트의 약속)
             for notice in notices:
                 try:
-                    self.notifier.notice(notice)
+                    self.notifier.notice({**notice, "experimentId": self._experiment_id})
                 except Exception as error:  # 알림이 실패해도 회차는 이어 감
                     name = type(error).__name__  # 예외 종류만(글에 키·번호가 섞일 수 있음)
                     log.error(
@@ -645,6 +652,7 @@ class Experiment:
             quality=self.grade(elapsed_s, latest, absent),
             thresholds_m=self._rule.thresholds_m,
             alerts=bulletin(watch),
+            notifier=self.alarm(),  # 그 tick 의 방식·무장(기록 state 줄도 응답과 같게)
         )
 
     # 단계 전환 사건 한 줄. 도달 초(올림한 정수)가 0 이면 "한계 도달", 안 오르면 생략
@@ -671,6 +679,40 @@ class Experiment:
             previous=previous,
             etaSec=eta_s,
         )
+
+    # 알림의 (발송 방식, 무장 여부). 무장을 모르는 알림(시험용 가짜 등)은 stub·해제
+    def alarm(self) -> tuple[str, bool]:
+        if isinstance(self.notifier, Switch):
+            return self.notifier.mode, bool(self.notifier.armed)
+        return "stub", False
+
+    # 실제 발송 무장·해제. 켤 때만 재생·mode·환경 변수를 보고 안 맞으면 409
+    def arm(self, on: bool) -> None:
+        switch = self.notifier if isinstance(self.notifier, Switch) else None
+        if not on:
+            if switch is not None:
+                switch.arm(False)
+            return
+        if self._replay is not None:
+            raise Conflict("재생 중에는 실제 발송을 무장할 수 없다")
+        if switch is None or switch.mode != "sms":
+            raise Conflict("notifier.mode 가 sms 가 아니라 무장할 수 없다")
+        if not switch.ready:
+            raise Conflict("발송 환경 변수가 없어 무장할 수 없다")
+        switch.arm(True)
+
+    # 시험 문자 한 건을 보내고 (가린 번호, 본문)을 돌려줌. 무장·횟수는 409, 발송 실패는 502
+    def trial(self) -> tuple[str, str]:
+        if self._replay is not None:
+            raise Conflict("재생 중에는 시험 문자를 보낼 수 없다")
+        if not isinstance(self.notifier, Switch):
+            raise Conflict("무장하지 않아 시험 문자를 보낼 수 없다")
+        try:
+            return self.notifier.trial(self.clock.now())
+        except Spent as error:
+            raise Conflict(str(error)) from None
+        except Exception as error:  # 예외 종류만(글에 키·번호가 섞일 수 있음)
+            raise Bounce(type(error).__name__) from None
 
     # 장치 메시지를 받아 둠(입력원이 live 일 때 다음 tick 에 쓰임). 모르는 장치는 422
     def intake(self, message: dict) -> None:

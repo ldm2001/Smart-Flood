@@ -2,7 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Gauge } from "./ZoneGauge";
 
-const content = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+// 아이콘 SVG 를 [이름] 글로 바꾸고 태그를 빼 공백을 하나로 줄여 글만 남기는 도우미
+const content = (html: string) =>
+  html
+    .replace(/<svg[^>]*data-icon="([^"]+)"[^>]*>[\s\S]*?<\/svg>/g, " [$1] ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ");
 // 화면 낭독·복사로 읽히는 글자 그대로 남기는 도우미
 const plain = (html: string) => html.replace(/<[^>]+>/g, "");
 const RISING = { "10": 49.6, "20": 54.3, "30": 58.9 };  // 상승 중인 예측 수위(mm)
@@ -26,7 +31,7 @@ describe("Gauge", () => {
       "44.9 mm",  // 반올림하면 45.0 이 되어 한계에 닿은 것처럼 읽히므로 내림한 값
       "한계 45 mm",
       "한계 대비 99 %",
-      "▲ 경계",
+      "[triangle] 경계",
       "약 10초 후 한계 도달 예상",
       "+10초 49.6",
       "+20초 54.3",
@@ -66,7 +71,7 @@ describe("Gauge", () => {
     );
     expect(html).toContain('style="width:20%"');  // 채움 너비는 11/55 이므로 20% 여야 함
     for (const left of ["40%", "60%", "80%"]) expect(html).toContain(`style="left:${left}"`);
-    expect(content(html)).toContain("✓ 정상");
+    expect(content(html)).toContain("[check] 정상");
     expect(content(html)).toContain("30초 안에 한계 도달 예상 없음");
   });
 
