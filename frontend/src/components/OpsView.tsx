@@ -59,7 +59,8 @@ export function Desk() {
   const press = (input: Press) => {
     const next = step(open, input);
     setOpen(next.open);
-    if (next.send !== null) void send(command(next.send));
+    // 재생은 기록 화면에서 보냄
+    if (next.send !== null && next.send !== "replay") void send(command(next.send));
   };
   return (
     <Sheet

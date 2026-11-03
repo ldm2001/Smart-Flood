@@ -73,6 +73,9 @@ export const stateSchema = z.looseObject({  // 상태 응답(/api/state) 전체.
   alerts: z.array(alertSchema),
   runState: runStateSchema.nullable().optional(),
   predictionMeta: predictionMeta.nullable().optional(),
+  notifier: z  // 문자 알림 방식과 무장 여부. 없는 서버도 있음
+    .looseObject({ mode: z.enum(["stub", "sms"]), armed: z.boolean() })
+    .optional(),
 });
 
 // 사건 단계(정상·주의·경계·침수). 경보 단계와 달리 정상을 담음
@@ -96,6 +99,15 @@ export const eventSchema = z.discriminatedUnion("kind", [  // 기록의 사건 �
 ]);
 export const eventsSchema = z.looseObject({ events: z.array(eventSchema) });  // 사건 응답
 
+export const logSchema = z.looseObject({  // 실험 기록 목록의 한 줄. 모르는 칸은 남김
+  experimentId: z.string().regex(/^EXP-[0-9]{8}-[0-9]{3,}$/),  // 백엔드 실험 번호 꼴
+  startTime: kstTime,
+  dataSource: dataSourceSchema,
+  modelVersion: z.string(),
+  configHash: z.string(),
+});
+export const logsSchema = z.looseObject({ logs: z.array(logSchema) });  // 기록 목록 응답
+
 // 서버 상태 타입
 export type Snapshot = z.infer<typeof stateSchema>;
 // 구역 이름 타입
@@ -118,6 +130,10 @@ export type Horizons = z.infer<typeof horizons>;
 export type LogEvent = z.infer<typeof eventSchema>;
 // 단계 전환 사건 타입
 export type StageEvent = Extract<LogEvent, { kind: "stage" }>;
+// 실험 기록 목록의 한 줄 타입
+export type Log = z.infer<typeof logSchema>;
+// 문자 알림 상태 타입
+export type Notifier = NonNullable<Snapshot["notifier"]>;
 // 강우 단계 타입
 export type Preset = z.infer<typeof presetSchema>;
 // 설정의 강우 단계값과 상한
@@ -131,7 +147,8 @@ export type Command =
   | { control: "rain"; body: { intensity: Preset } | { mmPerHour: number } }
   | { control: "blockage"; body: { type: "none" } | { type: "partial" | "full"; location: string } }
   | { control: "sim"; body: { mode: "sim" } }
-  | { control: "live"; body: { mode: "live" } };
+  | { control: "live"; body: { mode: "live" } }
+  | { control: "replay"; body: { mode: "replay"; logId: string } };
 // 제어 이름 타입
 export type Control = Command["control"];
 
@@ -143,6 +160,11 @@ export function contract(body: unknown): Snapshot {
 // 사건 응답을 검사해 사건 목록만 돌려줌
 export function chronicle(body: unknown): LogEvent[] {
   return eventsSchema.parse(body).events;
+}
+
+// 기록 목록 응답을 검사해 목록만 돌려줌
+export function catalog(body: unknown): Log[] {
+  return logsSchema.parse(body).logs;
 }
 
 const thresholdMm = z.number().gt(0).max(500);  // 한계 수위(mm): 0 초과 500 이하

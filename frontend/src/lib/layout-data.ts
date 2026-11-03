@@ -148,6 +148,7 @@ export const CONTROL_NAMES: Record<Control, string> = {  // 제어 단추와 결
   blockage: "막힘 적용",
   sim: "시뮬레이션으로 바꾸기",
   live: "실측으로 바꾸기",
+  replay: "재생 시작",
 };
 
 export const REPLAY_NAMES = { stop: "재생 멈춤", sim: "시뮬레이션으로 돌아가기" } as const;  // 재생 중 이름

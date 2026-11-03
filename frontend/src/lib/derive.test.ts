@@ -692,8 +692,22 @@ const brief = (all: Record<Control, Gate>) =>
   );
 const BUSY = "own:회차가 진행 중이라 입력원을 바꿀 수 없습니다. 먼저 종료합니다";  // 진행 중 입력원
 const UNKNOWN = "own:서버가 회차 상태를 보내지 않았습니다";  // 회차 상태 없음
-const IDLE = { start: "on", stop: "own:진행 중이 아닙니다", reset: "on", rain: "on", blockage: "on" };
-const RUNNING = { start: "own:이미 진행 중입니다", stop: "on", reset: "on", rain: "on", blockage: "on" };
+const IDLE = {
+  start: "on",
+  stop: "own:진행 중이 아닙니다",
+  reset: "on",
+  rain: "on",
+  blockage: "on",
+  replay: "on",
+};
+const RUNNING = {
+  start: "own:이미 진행 중입니다",
+  stop: "on",
+  reset: "on",
+  rain: "on",
+  blockage: "on",
+  replay: "own:회차가 도는 중이라 재생할 수 없습니다. 운영·설정에서 먼저 종료합니다",
+};
 const REPLAYING = {  // 재생 중 끈 제어와 이유
   start: "own:재생 중에는 회차를 시작할 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다",
   reset: "own:재생 중에는 초기화할 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다",
@@ -701,16 +715,20 @@ const REPLAYING = {  // 재생 중 끈 제어와 이유
   blockage: "own:재생 중에는 막힘을 바꿀 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다",
   live: "own:재생 중에는 실측으로 바꿀 수 없습니다. 먼저 시뮬레이션으로 돌아갑니다",
   sim: "on",
+  replay: "on",  // 다른 기록으로 바꿈
 };
 const HALT = {  // 연결마다 제어를 끈 이유
   connecting: "서버에 연결하는 중이라 제어를 끕니다",
   mock: "서버에 연결되지 않아 제어를 끕니다. 가상 데이터에는 보내지 않습니다",
   lost: "연결이 끊겨 제어를 끕니다 · 마지막 수신 10:00:00 기준",
 };
-// 일곱 제어가 모두 같은 판정
+// 여덟 제어가 모두 같은 판정
 const every = (text: string) =>
   Object.fromEntries(
-    ["start", "stop", "reset", "rain", "blockage", "sim", "live"].map((key) => [key, text]),
+    ["start", "stop", "reset", "rain", "blockage", "sim", "live", "replay"].map((key) => [
+      key,
+      text,
+    ]),
   );
 
 describe("linkage", () => {
@@ -756,7 +774,7 @@ describe("gates", () => {
     });
     const replay = gates("online", T0, snap("running", "replay"), "stop");
     const busy = "note:재생 멈춤 보내는 중입니다";
-    expect(brief(replay)).toEqual({ ...REPLAYING, stop: busy, sim: busy });
+    expect(brief(replay)).toEqual({ ...REPLAYING, stop: busy, sim: busy, replay: busy });
   });
 
   it("keeps the reason lines of every panel while a control is being sent", () => {
@@ -811,6 +829,7 @@ describe("gates", () => {
       blockage: "on",
       sim: UNKNOWN,
       live: UNKNOWN,
+      replay: UNKNOWN,
     };
     expect(brief(gates("online", T0, snap(null, "sim"), null))).toEqual(unknown);
     expect(brief(gates("online", T0, snap(undefined, "live"), null))).toEqual(unknown);

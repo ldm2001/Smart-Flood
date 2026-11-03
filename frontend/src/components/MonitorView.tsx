@@ -165,7 +165,11 @@ export function Panel(props: Scene & { events?: Events }) {
         <Devices snapshot={snapshot} />
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <Timeline log={log} />
+        <Timeline
+          log={log}
+          notifier={snapshot?.notifier ?? null}
+          past={snapshot?.dataSource === "replay"}
+        />
         <Journal log={log} />
       </div>
     </main>

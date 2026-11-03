@@ -1,6 +1,6 @@
-import { clock, lead, milestones, ZONE_IDS, type Milestones } from "@/lib/derive";
+import { clock, lead, milestones, relay, ZONE_IDS, type Milestones } from "@/lib/derive";
 import { STAGE_ICONS, STAGE_LABELS, ZONES } from "@/lib/layout-data";
-import type { StageEvent } from "@/lib/schema";
+import type { Notifier, StageEvent } from "@/lib/schema";
 import type { Events } from "@/lib/useEvents";
 import { Glyph } from "./Glyph";
 
@@ -9,8 +9,15 @@ const moment = (event: StageEvent) => clock(Date.parse(event.time));  // 사건 
 // 사건의 경과 밀리초. 없으면 null
 const at = (event: StageEvent | null) => (event === null ? null : event.elapsedSec * 1000);
 
+// 타임라인이 받는 값
+interface Props {
+  log: Events | null;  // 읽은 사건. 받기 전 null
+  notifier?: Notifier | null;  // 서버의 문자 알림 상태. 없으면 기록만
+  past?: boolean;  // 지난 기록이나 재생이면 true. 그때의 발송 결과는 모름
+}
+
 // 구역별 위험 판단·문자 요청·실제 도달과 선행 시간
-export function Timeline({ log }: { log: Events | null }) {
+export function Timeline({ log, notifier, past = false }: Props) {
   return (
     <section aria-label="위험 판단·시험용 문자" className="panel p-5">
       <h2 className="mb-4 text-lg font-medium">위험 판단·시험용 문자</h2>
@@ -54,7 +61,7 @@ export function Timeline({ log }: { log: Events | null }) {
                   {request ? (
                     <>
                       <span className="font-mono tabular-nums">{moment(request)}</span>
-                      {" · 기록만, 실제 발송 차단"}
+                      {` · ${relay(notifier, past)}`}
                     </>
                   ) : (
                     "—"

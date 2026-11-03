@@ -1,4 +1,5 @@
 import {
+  catalog,
   cause,
   ceilings,
   chronicle,
@@ -6,6 +7,7 @@ import {
   rainfall,
   type Command,
   type Control,
+  type Log,
   type LogEvent,
   type Rainfall,
   type Snapshot,
@@ -75,6 +77,11 @@ export async function logbook(id: string): Promise<LogEvent[]> {
   }
 }
 
+// 실험 기록 목록을 읽음
+export async function records(): Promise<Log[]> {
+  return catalog(await reply("/api/logs"));
+}
+
 // 제어 실패의 모양
 export type Fault =
   | { kind: "refused"; status: number; text: string }  // 서버가 이유를 붙여 거절
@@ -94,6 +101,7 @@ const ROUTES: Record<Control, string> = {  // 제어마다 POST 주소
   blockage: "/api/blockage",
   sim: "/api/source",
   live: "/api/source",
+  replay: "/api/source",
 };
 
 // 제어를 POST 로 보냄. 성공은 바뀐 뒤 상태, 실패는 그 모양과 시각. 던지지 않음

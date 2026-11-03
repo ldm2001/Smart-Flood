@@ -14,6 +14,7 @@ import type {
   Control,
   Input,
   LogEvent,
+  Notifier,
   Preset,
   Snapshot,
   Source,
@@ -441,7 +442,7 @@ export type Linkage = "connecting" | "mock" | "lost" | "online";
 // 제어 하나의 켜짐. 꺼지면 이유 글과 그 글이 있는 자리
 export type Gate = { on: true } | { on: false; reason: string; cue: "halt" | "note" | "own" };
 // 확인 줄을 거치는 제어
-export type Hazard = "stop" | "reset" | "sim" | "live";
+export type Hazard = "stop" | "reset" | "sim" | "live" | "replay";
 // 확인 줄에 들어오는 누름
 export type Press =
   | { kind: "ask"; control: Hazard }  // 제어 단추: 그 줄을 엶
@@ -465,7 +466,7 @@ const ON: Gate = { on: true };  // 켜진 판정
 // 그 칸의 이유 목록에 적고 끈 판정
 const veto = (reason: string): Gate => ({ on: false, reason, cue: "own" });
 
-// 일곱 제어 모두에 같은 판정
+// 여덟 제어 모두에 같은 판정
 function blanket(gate: Gate): Record<Control, Gate> {
   return {
     start: gate,
@@ -475,6 +476,7 @@ function blanket(gate: Gate): Record<Control, Gate> {
     blockage: gate,
     sim: gate,
     live: gate,
+    replay: gate,
   };
 }
 
@@ -523,6 +525,7 @@ export function gates(
       blockage: hold(rest.blockage),
       sim: hold(rest.sim),
       live: hold(rest.live),
+      replay: hold(rest.replay),
     };
   }
   const run = snapshot.runState;
@@ -535,6 +538,7 @@ export function gates(
       blockage: veto("재생 중에는 막힘을 바꿀 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다"),
       sim: ON,
       live: veto("재생 중에는 실측으로 바꿀 수 없습니다. 먼저 시뮬레이션으로 돌아갑니다"),
+      replay: ON,  // 다른 기록은 처음부터 재생. 같은 기록은 rerun 이 끔
     };
   }
   if (run === null || run === undefined) {
@@ -553,6 +557,9 @@ export function gates(
     blockage: ON,
     sim: snapshot.dataSource === "sim" ? veto("이미 시뮬레이션입니다") : changeover,
     live: snapshot.dataSource === "live" ? veto("이미 실측입니다") : changeover,
+    replay: running
+      ? veto("회차가 도는 중이라 재생할 수 없습니다. 운영·설정에서 먼저 종료합니다")
+      : ON,
   };
 }
 
@@ -602,6 +609,19 @@ export function command(control: "start" | "stop" | "reset" | "sim" | "live"): C
   return { control, body: {} };
 }
 
+// 재생 시작 요청. 본문은 입력원 재생과 기록 번호만
+export function playback(id: string): Command {
+  return { control: "replay", body: { mode: "replay", logId: id } };
+}
+
+// 재생 시작 검사. 그 기록을 이미 재생 중이면 실패
+export function rerun(snapshot: Snapshot | null, id: string): Check<string> {
+  if (snapshot?.dataSource === "replay" && snapshot.experimentId === id) {
+    return { ok: false, reason: "이 기록을 재생하는 중입니다" };
+  }
+  return { ok: true, value: id };
+}
+
 // 강우 요청. 단계 이름이면 단계, 숫자면 직접 입력(mm/h)
 export function shower(choice: Preset | number): Command {
   if (typeof choice === "number") return { control: "rain", body: { mmPerHour: choice } };
@@ -634,6 +654,10 @@ export function question(control: Hazard, snapshot: Snapshot): string {
   const replay = snapshot.dataSource === "replay";
   const tail = "대기로 돌아가고 강우·막힘 선택이 기본값이 됩니다";  // 입력원 전환 뒤 일
   const wipe = "멈춘 회차의 마지막 화면도 지워집니다. 기록 파일은 남습니다";
+  if (control === "replay") {
+    if (replay) return "지금 재생을 끝내고 이 기록을 처음부터 재생할까요?";
+    return "이 기록을 처음부터 재생할까요? 멈춘 회차의 마지막 화면은 재생 화면으로 바뀝니다";
+  }
   if (control === "stop") {
     if (replay) return "재생을 멈출까요? 멈춘 재생은 이어 볼 수 없습니다";
     return "회차를 종료할까요? 비가 그치고 마지막 상태가 남습니다";
@@ -654,6 +678,7 @@ function effect(control: Control, snapshot: Snapshot, replay: boolean): string {
   if (control === "rain") return `강우 ${snapshot.rain.mmPerHour} mm/h`;
   if (control === "blockage") return `막힘 설정 · ${snapshot.blockage.label}`;
   if (control === "sim") return replay ? "재생 끝냄 · 입력원 시뮬레이션" : "입력원 시뮬레이션";
+  if (control === "replay") return `재생 시작 · ${snapshot.experimentId}`;
   return "입력원 실측";
 }
 
@@ -738,4 +763,45 @@ export function amendment(
     ? { ok: true, value: values }
     : { ok: false, reason: "바뀐 값이 없습니다" };
   return { texts, checks, save };
+}
+
+// 구역 하나의 예측·실제 비교. 시각은 밀리초, 간격은 초. 모르는 칸은 null
+export interface Tally {
+  zone: Zone;
+  judgement: number | null;  // 위험 판단 시각: 에피소드 시작 사건
+  forecast: number | null;  // 예측 도달 시각: 판단 시각 + 그 사건의 etaSec
+  arrival: number | null;  // 실제 도달 시각: 첫 침수 사건
+  lead: number | null;  // 선행 시간: 실제 도달 - 위험 판단
+  error: number | null;  // 오차: 실제 도달 - 예측 도달(부호 포함)
+}
+
+// 기록 사건으로 구역마다 예측 도달과 실제 도달을 견줌. 간격은 경과 초로 셈
+export function tally(events: readonly LogEvent[]): Tally[] {
+  return ZONE_IDS.map((zone) => {
+    const { judgement, arrival } = milestones(events, zone);
+    const eta = judgement?.etaSec ?? null;  // 판단 사건의 도달 남은 초
+    const ahead = judgement !== null && eta !== null ? judgement.elapsedSec + eta : null;
+    return {
+      zone,
+      judgement: judgement === null ? null : Date.parse(judgement.time),
+      forecast: judgement !== null && eta !== null ? Date.parse(judgement.time) + eta * 1000 : null,
+      arrival: arrival === null ? null : Date.parse(arrival.time),
+      lead: lead(judgement && judgement.elapsedSec * 1000, arrival && arrival.elapsedSec * 1000),
+      error: ahead === null || arrival === null ? null : arrival.elapsedSec - ahead,
+    };
+  });
+}
+
+// 초 간격 글. 없으면 줄표, signed 면 양수에 + 를 붙임
+export function span(sec: number | null, signed = false): string {
+  if (sec === null) return "—";
+  const value = Math.round(sec);
+  return `${signed && value > 0 ? "+" : ""}${value}초`;
+}
+
+// 문자 요청 줄의 발송 글. 지난 기록·재생은 결과를 모름. 문자 방식이고 무장했을 때만 실제 발송
+export function relay(notifier: Notifier | null | undefined, past = false): string {
+  if (past) return "발송 결과는 서버 로그에만 남음";  // 결과는 실험 기록에 없음
+  if (notifier?.mode === "sms" && notifier.armed) return "실제 발송 켜짐, 허용 번호만";
+  return "기록만, 실제 발송 차단";
 }
