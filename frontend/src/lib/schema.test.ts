@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import { ZodError } from "zod";
 import {
   alertSchema,
+  cause,
   ceilings,
   chronicle,
   contract,
   eventSchema,
   eventStageSchema,
+  rainfall,
   stageSchema,
   stateSchema,
 } from "./schema";
@@ -160,6 +162,95 @@ describe("ceilings", () => {
     expect(() => ceilings(version((b) => (b.zones.B.threshold_mm = 0)))).toThrow(ZodError);
     expect(() => ceilings(version((b) => (b.zones.B.threshold_mm = 500.1)))).toThrow(ZodError);
     expect(() => ceilings(null)).toThrow(ZodError);
+  });
+});
+
+const RAINY = {  // 강우 설정을 더한 설정 예시. 값은 config.yaml 가정값과 같은 꼴
+  ...CONFIG,
+  rain_presets_mm_per_h: { light: 30, medium: 60, heavy: 90 },
+  rain_max_mm_per_h: 150,
+};
+const PRESETS = { light: 30, medium: 60, heavy: 90 };  // RAINY 의 강우 단계값(mm/h)
+
+// 강우 설정 예시를 복사해 고친 사본을 만드는 도우미
+function rainy(mutate: (body: Json) => void): Json {
+  const body = structuredClone(RAINY) as Json;
+  mutate(body);
+  return body;
+}
+
+describe("rainfall", () => {
+  it("reads the rain presets and the input ceiling", () => {
+    expect(rainfall(RAINY)).toEqual({ presets: PRESETS, maxMmPerHour: 150 });
+  });
+
+  it("gives null when the rain part is missing or broken", () => {
+    expect(rainfall(CONFIG)).toBeNull();
+    expect(rainfall(null)).toBeNull();
+    expect(rainfall(rainy((b) => delete b.rain_presets_mm_per_h.heavy))).toBeNull();
+    expect(rainfall(rainy((b) => (b.rain_presets_mm_per_h.light = "30")))).toBeNull();
+    expect(rainfall(rainy((b) => (b.rain_presets_mm_per_h.light = -1)))).toBeNull();
+    expect(rainfall(rainy((b) => (b.rain_presets_mm_per_h.heavy = 151)))).toBeNull();
+    expect(rainfall(rainy((b) => (b.rain_presets_mm_per_h = [30, 60, 90])))).toBeNull();
+    expect(rainfall(rainy((b) => (b.rain_max_mm_per_h = 0)))).toBeNull();
+    expect(rainfall(rainy((b) => (b.rain_max_mm_per_h = Infinity)))).toBeNull();
+    expect(rainfall(rainy((b) => delete b.rain_max_mm_per_h))).toBeNull();
+  });
+
+  it("accepts zero and a preset equal to the ceiling", () => {
+    const edge = rainy((b) => Object.assign(b.rain_presets_mm_per_h, { light: 0, heavy: 150 }));
+    const presets = { light: 0, medium: 60, heavy: 150 };  // 0 과 상한과 같은 단계
+    expect(rainfall(edge)).toEqual({ presets, maxMmPerHour: 150 });
+  });
+
+  it("keeps reading when the presets carry keys it does not know", () => {
+    const extra = rainy((b) => Object.assign(b.rain_presets_mm_per_h, { storm: 999, note: "가정값" }));
+    expect(rainfall(extra)).toEqual({ presets: PRESETS, maxMmPerHour: 150 });
+  });
+});
+
+describe("cause", () => {
+  const KOREAN = {  // 서버 검사기가 붙인 한국어 이유(422)
+    detail: [
+      { loc: ["body", "mmPerHour"], msg: "강우는 0~150 mm/h 여야 한다: 999.0", type: "value_error" },
+    ],
+  };
+  const ENGLISH = {  // pydantic 기본 검사의 영어 이유(422)
+    detail: [
+      {
+        type: "greater_than_equal",
+        loc: ["body", "mmPerHour"],
+        msg: "Input should be greater than or equal to 0",
+        input: -1,
+        ctx: { ge: 0 },
+      },
+    ],
+  };
+
+  it("reads the reason text of a 409 or 503", () => {
+    const text = "회차가 도는 중에는 입력원을 바꿀 수 없다. 먼저 종료한다";  // 서버의 409 글
+    expect(cause({ detail: text })).toBe(text);
+  });
+
+  it("reads the message of a 422 whose first item is a value_error", () => {
+    expect(cause(KOREAN)).toBe("강우는 0~150 mm/h 여야 한다: 999.0");
+  });
+
+  it("gives null for English checks and other shapes", () => {
+    expect(cause(ENGLISH)).toBeNull();
+    expect(cause({ detail: [ENGLISH.detail[0], KOREAN.detail[0]] })).toBeNull();  // 첫 항목만 봄
+    const others = [  // 이유 글이 없는 본문들
+      null,
+      "오류",
+      {},
+      { detail: "" },
+      { detail: 3 },
+      { detail: [] },
+      { detail: [{ msg: "", type: "value_error" }] },
+      { detail: [{ type: "value_error" }] },
+      { detail: [{ msg: "강우는 0~150 mm/h 여야 한다" }] },
+    ];
+    for (const body of others) expect(cause(body)).toBeNull();
   });
 });
 

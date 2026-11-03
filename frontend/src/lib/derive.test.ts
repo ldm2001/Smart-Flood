@@ -33,12 +33,40 @@ import {
   address,
   notches,
   EVENT_ROWS,
+  linkage,
+  halt,
+  gates,
+  step,
+  rate,
+  brim,
+  command,
+  shower,
+  plug,
+  pass,
+  wording,
+  question,
+  outcome,
+  reasons,
+  amendment,
+  type Delivery,
+  type Gate,
   type Grade,
   type Milestones,
 } from "./derive";
 import { PLAN_ZONES } from "./layout-data";
 import { demo } from "./mock";
-import type { Alert, LogEvent, StageEvent, Zone, Source } from "./schema";
+import type { Fault } from "./api";
+import type {
+  Alert,
+  Control,
+  Input,
+  LogEvent,
+  Run,
+  Snapshot,
+  StageEvent,
+  Zone,
+  Source,
+} from "./schema";
 
 const plateau = (v: number) => ({ "10": v, "20": v, "30": v });
 const THRESHOLDS = { A: 45, B: 55, C: 65 };  // 구역별 한계 수위(mm)
@@ -647,5 +675,373 @@ describe("notches", () => {
   it("puts a minor tick halfway between neighbouring gridlines", () => {
     expect(notches([{ y: 100 }, { y: 60 }, { y: 20 }])).toEqual([80, 40]);
     expect(notches([{ y: 10 }])).toEqual([]);
+  });
+});
+
+// 회차 상태와 입력원을 정한 응답. runState 를 undefined 로 주면 그 칸을 뺌
+function snap(runState: Run | null | undefined, dataSource: Input): Snapshot {
+  const base: Snapshot = { ...demo(T0, THRESHOLDS), dataSource };
+  if (runState === undefined) delete base.runState;
+  else base.runState = runState;
+  return base;
+}
+// 판정을 켜짐은 "on", 꺼짐은 "자리:이유" 글로 줄임
+const brief = (all: Record<Control, Gate>) =>
+  Object.fromEntries(
+    Object.entries(all).map(([key, gate]) => [key, gate.on ? "on" : `${gate.cue}:${gate.reason}`]),
+  );
+const BUSY = "own:회차가 진행 중이라 입력원을 바꿀 수 없습니다. 먼저 종료합니다";  // 진행 중 입력원
+const UNKNOWN = "own:서버가 회차 상태를 보내지 않았습니다";  // 회차 상태 없음
+const IDLE = { start: "on", stop: "own:진행 중이 아닙니다", reset: "on", rain: "on", blockage: "on" };
+const RUNNING = { start: "own:이미 진행 중입니다", stop: "on", reset: "on", rain: "on", blockage: "on" };
+const REPLAYING = {  // 재생 중 끈 제어와 이유
+  start: "own:재생 중에는 회차를 시작할 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다",
+  reset: "own:재생 중에는 초기화할 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다",
+  rain: "own:재생 중에는 강우를 바꿀 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다",
+  blockage: "own:재생 중에는 막힘을 바꿀 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다",
+  live: "own:재생 중에는 실측으로 바꿀 수 없습니다. 먼저 시뮬레이션으로 돌아갑니다",
+  sim: "on",
+};
+const HALT = {  // 연결마다 제어를 끈 이유
+  connecting: "서버에 연결하는 중이라 제어를 끕니다",
+  mock: "서버에 연결되지 않아 제어를 끕니다. 가상 데이터에는 보내지 않습니다",
+  lost: "연결이 끊겨 제어를 끕니다 · 마지막 수신 10:00:00 기준",
+};
+// 일곱 제어가 모두 같은 판정
+const every = (text: string) =>
+  Object.fromEntries(
+    ["start", "stop", "reset", "rain", "blockage", "sim", "live"].map((key) => [key, text]),
+  );
+
+describe("linkage", () => {
+  it("waits for the clock and the first answer, and calls a failed first try mock", () => {
+    expect(linkage(null, T0, false)).toBe("connecting");
+    expect(linkage(T0, null, false)).toBe("connecting");
+    expect(linkage(T0, null, true)).toBe("mock");
+  });
+
+  it("calls the link lost only when a poll failed more than 4 s after the last answer", () => {
+    expect(linkage(T0 + 4000, T0, true)).toBe("online");
+    expect(linkage(T0 + 4001, T0, true)).toBe("lost");
+    expect(linkage(T0 + 4001, T0, false)).toBe("connecting");  // 실패 없이 오래됨: 다시 묻는 중
+  });
+});
+
+describe("halt", () => {
+  it("names why the controls are off for each link", () => {
+    expect(halt("online", T0)).toBeNull();
+    expect(halt("connecting", null)).toBe(HALT.connecting);
+    expect(halt("mock", null)).toBe(HALT.mock);
+    expect(halt("lost", T0)).toBe(HALT.lost);
+    expect(halt("lost", null)).toBe("연결이 끊겨 제어를 끕니다 · 마지막 수신 — 기준");
+  });
+});
+
+describe("gates", () => {
+  it("turns everything off with the halt text until the link is online", () => {
+    const state = snap("idle", "sim");
+    expect(brief(gates("connecting", null, null, null))).toEqual(every(`halt:${HALT.connecting}`));
+    expect(brief(gates("mock", null, null, null))).toEqual(every(`halt:${HALT.mock}`));
+    expect(brief(gates("lost", T0, state, null))).toEqual(every(`halt:${HALT.lost}`));
+    expect(brief(gates("lost", T0, state, "start"))).toEqual(every(`halt:${HALT.lost}`));  // 끊김이 먼저
+    expect(brief(gates("online", T0, null, null))).toEqual(every(`halt:${HALT.connecting}`));
+  });
+
+  it("turns the gates that were on off while a control is being sent", () => {
+    const idle = gates("online", T0, snap("idle", "sim"), "start");
+    expect(brief(idle)).toEqual({
+      ...every("note:시작 보내는 중입니다"),
+      stop: "own:진행 중이 아닙니다",  // 제 이유로 꺼진 제어는 그 이유를 둠
+      sim: "own:이미 시뮬레이션입니다",
+    });
+    const replay = gates("online", T0, snap("running", "replay"), "stop");
+    const busy = "note:재생 멈춤 보내는 중입니다";
+    expect(brief(replay)).toEqual({ ...REPLAYING, stop: busy, sim: busy });
+  });
+
+  it("keeps the reason lines of every panel while a control is being sent", () => {
+    const lines = (all: Record<Control, Gate>) => reasons(Object.entries(all)).lines;
+    const states = [
+      snap("idle", "sim"),
+      snap("running", "live"),
+      snap("stopped", "replay"),
+      snap(null, "sim"),
+    ];
+    for (const state of states) {
+      const rest = gates("online", T0, state, null);  // 보내기 전
+      expect(lines(rest).length).toBeGreaterThan(0);
+      expect(lines(gates("online", T0, state, "rain"))).toEqual(lines(rest));
+    }
+  });
+
+  it("follows the run state and the input in sim and live", () => {
+    const sim = { sim: "own:이미 시뮬레이션입니다", live: "on" };  // 지금 sim
+    const live = { sim: "on", live: "own:이미 실측입니다" };  // 지금 live
+    expect(brief(gates("online", T0, snap("idle", "sim"), null))).toEqual({ ...IDLE, ...sim });
+    expect(brief(gates("online", T0, snap("idle", "live"), null))).toEqual({ ...IDLE, ...live });
+    expect(brief(gates("online", T0, snap("stopped", "sim"), null))).toEqual({ ...IDLE, ...sim });
+    expect(brief(gates("online", T0, snap("stopped", "live"), null))).toEqual({ ...IDLE, ...live });
+    expect(brief(gates("online", T0, snap("running", "sim"), null))).toEqual({
+      ...RUNNING,
+      sim: "own:이미 시뮬레이션입니다",  // 같은 쪽 전환이 먼저
+      live: BUSY,
+    });
+    expect(brief(gates("online", T0, snap("running", "live"), null))).toEqual({
+      ...RUNNING,
+      sim: BUSY,
+      live: "own:이미 실측입니다",
+    });
+  });
+
+  it("leaves only stop and the way back to sim during a replay", () => {
+    const running = gates("online", T0, snap("running", "replay"), null);
+    expect(brief(running)).toEqual({ ...REPLAYING, stop: "on" });
+    const halted = { ...REPLAYING, stop: "own:재생이 멈춰 있습니다" };  // 재생 정지
+    for (const runState of ["stopped", "idle", null, undefined] as const) {
+      expect(brief(gates("online", T0, snap(runState, "replay"), null))).toEqual(halted);
+    }
+  });
+
+  it("keeps reset, rain and blockage when the server sends no run state", () => {
+    const unknown = {
+      start: UNKNOWN,
+      stop: UNKNOWN,
+      reset: "on",
+      rain: "on",
+      blockage: "on",
+      sim: UNKNOWN,
+      live: UNKNOWN,
+    };
+    expect(brief(gates("online", T0, snap(null, "sim"), null))).toEqual(unknown);
+    expect(brief(gates("online", T0, snap(undefined, "live"), null))).toEqual(unknown);
+  });
+});
+
+describe("step", () => {
+  it("opens a row without sending, sends it on yes and closes on anything else", () => {
+    expect(step(null, { kind: "ask", control: "stop" })).toEqual({ open: "stop", send: null });
+    expect(step("stop", { kind: "ask", control: "reset" })).toEqual({ open: "reset", send: null });
+    expect(step("reset", { kind: "yes" })).toEqual({ open: null, send: "reset" });
+    expect(step("sim", { kind: "no" })).toEqual({ open: null, send: null });
+    expect(step("live", { kind: "other" })).toEqual({ open: null, send: null });
+    expect(step(null, { kind: "yes" })).toEqual({ open: null, send: null });
+  });
+});
+
+describe("rate and brim", () => {
+  it("checks the typed rain against the server ceiling", () => {
+    expect(rate("60", null)).toEqual({ ok: false, reason: "서버 강우 설정이 없어 직접 입력을 끕니다" });
+    expect(rate("  ", 150)).toEqual({ ok: false, reason: "0 ~ 150 사이 숫자를 넣어 주세요" });
+    expect(rate("abc", 150)).toEqual({ ok: false, reason: "숫자만 넣을 수 있습니다" });
+    expect(rate("Infinity", 150)).toEqual({ ok: false, reason: "숫자만 넣을 수 있습니다" });
+    expect(rate("-0.1", 150)).toEqual({ ok: false, reason: "0 이상이어야 합니다" });
+    expect(rate("150.1", 150)).toEqual({ ok: false, reason: "150 mm/h 이하만 됩니다" });
+    expect(rate(" 0 ", 150)).toEqual({ ok: true, value: 0 });
+    expect(rate("75.5", 150)).toEqual({ ok: true, value: 75.5 });
+    expect(rate("150", 150)).toEqual({ ok: true, value: 150 });
+  });
+
+  it("checks a mock threshold against the 500 mm ceiling", () => {
+    expect(brim("")).toEqual({ ok: false, reason: "숫자를 넣어 주세요" });
+    expect(brim("4.5mm")).toEqual({ ok: false, reason: "숫자만 넣을 수 있습니다" });
+    expect(brim("0")).toEqual({ ok: false, reason: "0 보다 커야 합니다" });
+    expect(brim("500.1")).toEqual({ ok: false, reason: "500 mm 이하만 됩니다" });
+    expect(brim("0.5")).toEqual({ ok: true, value: 0.5 });
+    expect(brim(" 500 ")).toEqual({ ok: true, value: 500 });
+  });
+});
+
+describe("command bodies", () => {
+  it("builds only the keys the server models accept", () => {
+    expect(command("start")).toEqual({ control: "start", body: {} });
+    expect(command("stop")).toEqual({ control: "stop", body: {} });
+    expect(command("reset")).toEqual({ control: "reset", body: {} });
+    expect(command("sim")).toEqual({ control: "sim", body: { mode: "sim" } });
+    expect(command("live")).toEqual({ control: "live", body: { mode: "live" } });
+    expect(shower("heavy")).toEqual({ control: "rain", body: { intensity: "heavy" } });
+    expect(shower(75.5)).toEqual({ control: "rain", body: { mmPerHour: 75.5 } });
+  });
+
+  it("asks for an inlet before a partial or full blockage", () => {
+    const none = { control: "blockage", body: { type: "none" } };  // 빗물받이 없이 보냄
+    expect(plug("none", "INLET-02")).toEqual({ ok: true, value: none });
+    expect(plug("partial", "INLET-02")).toEqual({
+      ok: true,
+      value: { control: "blockage", body: { type: "partial", location: "INLET-02" } },
+    });
+    expect(plug("full", null)).toEqual({ ok: false, reason: "막을 빗물받이를 골라 주세요" });
+  });
+
+  it("keeps an off gate and turns a failed check into the panel's own reason", () => {
+    const off: Gate = { on: false, reason: HALT.lost, cue: "halt" };
+    const wrong = { ok: false, reason: "숫자만 넣을 수 있습니다" } as const;
+    expect(pass(off, wrong)).toBe(off);
+    expect(pass({ on: true }, wrong)).toEqual({ on: false, reason: "숫자만 넣을 수 있습니다", cue: "own" });
+    expect(pass({ on: true }, { ok: true, value: 60 })).toEqual({ on: true });
+    const busy = gates("online", T0, snap("running", "sim"), "rain").rain;  // 보내는 중
+    expect(pass(busy, wrong)).toEqual({ on: false, reason: "숫자만 넣을 수 있습니다", cue: "own" });
+    expect(pass(busy, { ok: true, value: 60 })).toBe(busy);  // 통과하면 보내는 중 그대로
+  });
+});
+
+describe("wording and question", () => {
+  it("renames stop and sim while a replay runs", () => {
+    expect(wording("stop", false)).toBe("종료");
+    expect(wording("stop", true)).toBe("재생 멈춤");
+    expect(wording("sim", false)).toBe("시뮬레이션으로 바꾸기");
+    expect(wording("sim", true)).toBe("시뮬레이션으로 돌아가기");
+    expect(wording("rain", true)).toBe("강우 적용");
+  });
+
+  it("asks what each risky control will undo", () => {
+    expect(question("stop", snap("running", "sim"))).toBe(
+      "회차를 종료할까요? 비가 그치고 마지막 상태가 남습니다",
+    );
+    expect(question("stop", snap("running", "replay"))).toBe(
+      "재생을 멈출까요? 멈춘 재생은 이어 볼 수 없습니다",
+    );
+    expect(question("reset", snap("idle", "sim"))).toBe(
+      "강우·막힘 선택만 기본값(보통 강우, 막힘 없음)으로 돌립니다",
+    );
+    const end = "회차를 끝내고 대기로 돌아가며 강우·막힘 선택이 기본값이 됩니다. 기록 파일은 남습니다";
+    expect(question("reset", snap("running", "sim"))).toBe(end);
+    expect(question("reset", snap("stopped", "live"))).toBe(end);
+    expect(question("reset", snap(null, "sim"))).toBe(end);  // 회차 상태를 모르면 무거운 쪽 물음
+    const tail = "대기로 돌아가고 강우·막힘 선택이 기본값이 됩니다";  // 입력원 전환 뒤 일
+    const wipe = "멈춘 회차의 마지막 화면도 지워집니다. 기록 파일은 남습니다";
+    expect(question("sim", snap("idle", "live"))).toBe(`시뮬레이션으로 바꿀까요? ${tail}. ${wipe}`);
+    expect(question("live", snap("stopped", "sim"))).toBe(`실측으로 바꿀까요? ${tail}. ${wipe}`);
+    expect(question("sim", snap("stopped", "replay"))).toBe(
+      `재생을 끝내고 시뮬레이션으로 돌아갈까요? ${tail}`,
+    );
+  });
+});
+
+describe("outcome", () => {
+  // 성공한 제어. 받은 시각은 10:00:00
+  const done = (control: Control, snapshot: Snapshot, replay = false): Delivery => ({
+    control,
+    replay,
+    answer: { ok: true, receipt: { snapshot, receivedAt: T0 } },
+  });
+  // 실패한 제어. 실패 시각은 10:00:05
+  const miss = (control: Control, fault: Fault, replay = false): Delivery => ({
+    control,
+    replay,
+    answer: { ok: false, fault, at: T0 + 5000 },
+  });
+
+  it("says what changed and when it arrived", () => {
+    const state = { ...snap("running", "sim"), experimentId: "EXP-20261101-001" };
+    expect(outcome(done("start", state))).toEqual({
+      tone: "ok",
+      text: "반영 · 회차 시작 · EXP-20261101-001 · 10:00:00 수신",
+    });
+    expect(outcome(done("stop", state)).text).toBe("반영 · 회차 종료 · 10:00:00 수신");
+    expect(outcome(done("stop", state, true)).text).toBe("반영 · 재생 멈춤 · 10:00:00 수신");
+    expect(outcome(done("reset", state)).text).toBe("반영 · 초기화 · 대기 · 10:00:00 수신");
+    expect(outcome(done("rain", state)).text).toBe("반영 · 강우 60 mm/h · 10:00:00 수신");
+    expect(outcome(done("blockage", state)).text).toBe(
+      "반영 · 막힘 설정 · 빗물받이 ② 부분 막힘 · 10:00:00 수신",
+    );
+    expect(outcome(done("sim", state)).text).toBe("반영 · 입력원 시뮬레이션 · 10:00:00 수신");
+    expect(outcome(done("sim", state, true)).text).toBe(
+      "반영 · 재생 끝냄 · 입력원 시뮬레이션 · 10:00:00 수신",
+    );
+    expect(outcome(done("live", state)).text).toBe("반영 · 입력원 실측 · 10:00:00 수신");
+  });
+
+  it("names each failure in the screen's words", () => {
+    const text = "회차가 도는 중에는 입력원을 바꿀 수 없다. 먼저 종료한다";  // 서버의 409 글
+    expect(outcome(miss("live", { kind: "refused", status: 409, text }))).toEqual({
+      tone: "fail",
+      text: `실측으로 바꾸기 거절 · ${text} · 10:00:05`,
+    });
+    expect(outcome(miss("rain", { kind: "status", status: 422 }))).toEqual({
+      tone: "fail",
+      text: "강우 적용 실패 · 요청 모양 오류 HTTP 422 · 10:00:05",
+    });
+    expect(outcome(miss("reset", { kind: "status", status: 500 }))).toEqual({
+      tone: "fail",
+      text: "초기화 실패 · 서버 오류 HTTP 500 · 10:00:05",
+    });
+    expect(outcome(miss("start", { kind: "network" }))).toEqual({
+      tone: "fail",
+      text: "시작 실패 · 서버에 닿지 못했습니다 · 10:00:05",
+    });
+    expect(outcome(miss("stop", { kind: "timeout" }, true))).toEqual({
+      tone: "unsure",
+      text: "재생 멈춤 응답 없음 · 5초 안에 답이 없었습니다. 반영됐는지는 다음 수신으로 확인합니다 · 10:00:05",
+    });
+    expect(outcome(miss("blockage", { kind: "format" }))).toEqual({
+      tone: "unsure",
+      text: "막힘 적용 응답 모양 이상 · 서버는 받았을 수 있습니다. 다음 수신으로 확인합니다 · 10:00:05",
+    });
+  });
+});
+
+describe("reasons", () => {
+  it("keeps one line per text and points every holder at its first holder", () => {
+    const veto = gates("online", T0, snap("running", "replay"), null).rain;  // 재생 중 강우 꺼짐
+    const entries = [
+      ["rain-light", veto],
+      ["rain-medium", veto],
+      ["rain-heavy", veto],
+      ["rain", pass(veto, rate("", 150))],
+      ["rain-mm", rate("", 150)],
+    ] as const;
+    expect(reasons(entries)).toEqual({
+      lines: [
+        {
+          id: "ops-why-rain-light",
+          text: "재생 중에는 강우를 바꿀 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다",
+        },
+        { id: "ops-why-rain-mm", text: "0 ~ 150 사이 숫자를 넣어 주세요" },
+      ],
+      links: {
+        "rain-light": "ops-why-rain-light",
+        "rain-medium": "ops-why-rain-light",
+        "rain-heavy": "ops-why-rain-light",
+        rain: "ops-why-rain-light",
+        "rain-mm": "ops-why-rain-mm",
+      },
+    });
+  });
+
+  it("leaves out gates that are on, texts of the halt and note lines, and passed checks", () => {
+    const entries = [
+      ["start", { on: true }],
+      ["rain", gates("connecting", null, null, null).rain],  // 멈춤 줄의 이유
+      ["blockage", gates("online", T0, snap("idle", "sim"), "start").blockage],  // 결과 줄의 이유
+      ["rain-mm", rate("60", 150)],
+    ] as const;
+    expect(reasons(entries)).toEqual({ lines: [], links: {} });
+  });
+});
+
+describe("amendment", () => {
+  it("shows the saved values and keeps saving off until a value changes", () => {
+    const form = amendment({}, THRESHOLDS);
+    expect(form.texts).toEqual({ A: "45", B: "55", C: "65" });
+    expect(form.save).toEqual({ ok: false, reason: "바뀐 값이 없습니다" });
+    expect(amendment({ A: "45.0" }, THRESHOLDS).save).toEqual(form.save);  // 같은 수는 바뀜 아님
+  });
+
+  it("names the zone in each reason and blocks saving with the first wrong zone", () => {
+    const form = amendment({ B: "", C: "600" }, THRESHOLDS);
+    expect(form.texts).toEqual({ A: "45", B: "", C: "600" });
+    expect(form.checks).toEqual({
+      A: { ok: true, value: 45 },
+      B: { ok: false, reason: "B 구역 · 숫자를 넣어 주세요" },
+      C: { ok: false, reason: "C 구역 · 500 mm 이하만 됩니다" },
+    });
+    expect(form.save).toEqual(form.checks.B);
+  });
+
+  it("saves the trimmed number with the untouched zones", () => {
+    expect(amendment({ A: " 40.5 " }, THRESHOLDS).save).toEqual({
+      ok: true,
+      value: { A: 40.5, B: 55, C: 65 },
+    });
   });
 });

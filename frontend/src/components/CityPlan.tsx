@@ -11,6 +11,7 @@ import {
 import {
   BLOCKAGE_ICONS,
   BLOCKAGE_LABELS,
+  BLOCKAGE_TONES,
   INLETS,
   PLAN_METER,
   PLAN_PIPE,
@@ -41,12 +42,6 @@ const MARKS: Record<Blockage, string> = {  // 빗물받이 번호 글자. 막혔
   none: "text-muted",
   partial: "font-medium text-amber",
   full: "font-medium text-(--red)",
-};
-
-const BADGES: Record<Blockage, string> = {  // 막힘 칩의 테두리와 글자 색. 막힘 없으면 칩 기본색
-  none: "border-line",
-  partial: "border-amber text-amber",
-  full: "border-(--red) text-(--red)",
 };
 
 const METERS = [  // 배수 계량 두 값: 이름, drain 칸, 단위
@@ -173,7 +168,7 @@ export function Plan({ snapshot, statuses, thresholds }: Props) {
       }
       {snapshot && (
         <div className="mt-4">
-          <p className={`chip border ${BADGES[snapshot.blockage.type]}`}>
+          <p className={`chip border ${BLOCKAGE_TONES[snapshot.blockage.type]}`}>
             <Glyph name={BLOCKAGE_ICONS[snapshot.blockage.type]} />
             {snapshot.blockage.label}
           </p>

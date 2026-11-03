@@ -38,6 +38,7 @@ export type Scene =
       samples: readonly Sample[];
       thresholds: Readonly<Thresholds> | null;
       receivedAt: number | null;  // 마지막으로 받은 시각(ms). mock 이면 null
+      failed: boolean;  // 마지막 폴링이 실패했는가. mock 은 늘 참
     };
 
 // 장면을 고르는 순수 함수. 시각은 인자로 받음
@@ -52,6 +53,7 @@ export function scene(now: number | null, polled: Feed, mockThresholds: Readonly
       samples: trail(now),
       thresholds: mockThresholds,
       receivedAt: null,
+      failed: true,
     };
   }
   return {  // 한 번이라도 답했으면 끊겨도 마지막 정상 값을 보임
@@ -61,6 +63,7 @@ export function scene(now: number | null, polled: Feed, mockThresholds: Readonly
     samples: entry(polled.history, latest.snapshot).samples,  // 차트 끝과 게이지 일치용 현재값 추가
     thresholds: polled.thresholds,  // 서버 설정의 한계 수위. 받기 전에는 null
     receivedAt: latest.receivedAt,
+    failed: polled.failed,
   };
 }
 
@@ -105,7 +108,12 @@ export function Panel(props: Scene & { events?: Events }) {
           {// 입력원 표시(mock 이면 가짜 표시)
           }
           <Mode dataSource={snapshot?.dataSource ?? null} mock={props.view === "mock"} />
-          <Signal view={props.view} now={data?.now ?? null} receivedAt={data?.receivedAt ?? null} />
+          <Signal
+            view={props.view}
+            now={data?.now ?? null}
+            receivedAt={data?.receivedAt ?? null}
+            failed={data?.failed ?? false}
+          />
           {runState && (
             <span className="chip">
               <Glyph name={RUN_STATE_ICONS[runState]} />

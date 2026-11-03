@@ -100,6 +100,11 @@ function routes(dirs: string[], files: Entry[]): string[] {
   return problems;
 }
 
+const DIALOG_CALL = /\b(?:alert|confirm|prompt)\s*\(/g;  // 대화상자 규칙: 브라우저 기본 대화상자 호출 모양
+
+// 브라우저 기본 대화상자를 부르는 곳을 모으는 함수. 확인은 화면 안 확인 줄로 받음
+const dialogs = (text: string) => text.match(DIALOG_CALL) ?? [];
+
 const src = tree("src");
 const viewFiles = src.files.filter((file) => /^src\/(components|app)\//.test(file.path));
 const configFile: Entry = {
@@ -204,5 +209,28 @@ describe("check 7: nothing that static export cannot serve", () => {
     ];
     expect(found).toEqual([]);
     expect(routes(src.dirs, src.files)).toEqual([]);
+  });
+});
+
+describe("dialog rule: no browser alert, confirm or prompt", () => {
+  it("catches the three dialog calls in a sample", () => {
+    // 조각을 이어 붙여 예시를 만듦. 이 파일이 스스로 걸리지 않게 나눠 둠
+    const sample = [
+      "window.conf", "irm('종료할까요?');",
+      "aler", "t('보냈습니다');",
+      "promp", "t ('번호');",
+    ].join("");
+    expect(dialogs(sample)).toHaveLength(3);
+    // 이름만 닮은 글: 걸리면 안 됨
+    const decoy = "snapshot.alerts.length; const prompted = true; confirmed(); alertLevel(1);";
+    expect(dialogs(decoy)).toEqual([]);
+  });
+
+  it("scans every file under src, tests included", () => {
+    expect(src.files.length).toBeGreaterThan(0);
+    const found = src.files.flatMap((file) =>
+      dialogs(file.text).map((call) => `${file.path}: ${call}`),
+    );
+    expect(found).toEqual([]);
   });
 });

@@ -1,9 +1,20 @@
-import { DEVICE_KEYS, DEVICE_LABELS, PLAN_VIEW, ZONES } from "./layout-data";
+import type { Answer } from "./api";
+import {
+  CONTROL_NAMES,
+  DEVICE_KEYS,
+  DEVICE_LABELS,
+  PLAN_VIEW,
+  REPLAY_NAMES,
+  ZONES,
+} from "./layout-data";
 import type {
   Alert,
   Blockage,
+  Command,
+  Control,
   Input,
   LogEvent,
+  Preset,
   Snapshot,
   Source,
   StageEvent,
@@ -27,6 +38,7 @@ export interface Grade {
 export const ZONE_IDS: readonly Zone[] = ["A", "B", "C"];  // 구역 이름 목록(A·B·C 순서 고정)
 export const STAGE_ORDER: Record<Stage, number> = { safe: 0, caution: 1, warning: 2, evacuate: 3 };
 export const DISCONNECT_AFTER_MS = 4000;  // 마지막 정상 수신 뒤 4초(4000ms)가 넘으면 끊김으로 봄
+export const MAX_THRESHOLD_MM = 500;  // 한계 수위 상한(mm). 상태 응답의 수위 상한과 같음
 
 export const HORIZON_KEYS = ["10", "20", "30"] as const;  // 예측 시점 키(초)
 
@@ -422,4 +434,308 @@ export function address(path: string): string {
 // 이웃한 눈금 사이 가운데 높이. 표척의 작은 눈금 자리
 export function notches(gridlines: readonly { y: number }[]): number[] {
   return gridlines.slice(1).map((line, i) => (gridlines[i].y + line.y) / 2);
+}
+
+// 제어에 쓰는 연결 상태
+export type Linkage = "connecting" | "mock" | "lost" | "online";
+// 제어 하나의 켜짐. 꺼지면 이유 글과 그 글이 있는 자리
+export type Gate = { on: true } | { on: false; reason: string; cue: "halt" | "note" | "own" };
+// 확인 줄을 거치는 제어
+export type Hazard = "stop" | "reset" | "sim" | "live";
+// 확인 줄에 들어오는 누름
+export type Press =
+  | { kind: "ask"; control: Hazard }  // 제어 단추: 그 줄을 엶
+  | { kind: "yes" }
+  | { kind: "no" }
+  | { kind: "other" };  // 다른 제어를 누름
+// 입력 검사 결과
+export type Check<T = number> = { ok: true; value: T } | { ok: false; reason: string };
+// 결과 줄의 종류: 반영·실패·반영 모름
+export type Tone = "ok" | "fail" | "unsure";
+
+// 보낸 제어와 결과. replay 는 보낼 때의 재생 여부
+export interface Delivery {
+  control: Control;
+  answer: Answer;
+  replay: boolean;
+}
+
+const ON: Gate = { on: true };  // 켜진 판정
+
+// 그 칸의 이유 목록에 적고 끈 판정
+const veto = (reason: string): Gate => ({ on: false, reason, cue: "own" });
+
+// 일곱 제어 모두에 같은 판정
+function blanket(gate: Gate): Record<Control, Gate> {
+  return {
+    start: gate,
+    stop: gate,
+    reset: gate,
+    rain: gate,
+    blockage: gate,
+    sim: gate,
+    live: gate,
+  };
+}
+
+// 제어와 연결 표시가 함께 쓰는 연결 상태. 실패 없이 오래된 응답은 아직 연결 중
+export function linkage(nowMs: number | null, receivedAt: number | null, failed: boolean): Linkage {
+  if (nowMs === null) return "connecting";  // 시계를 아직 모름
+  if (receivedAt === null) return failed ? "mock" : "connecting";  // 받은 적 없음
+  if (!outage(nowMs, receivedAt)) return "online";
+  return failed ? "lost" : "connecting";  // 화면을 옮겨 돌아온 직후는 실패가 없음
+}
+
+// online 이 아닐 때 제어를 끈 이유 글
+function stoppage(link: Exclude<Linkage, "online">, receivedAt: number | null): string {
+  if (link === "connecting") return "서버에 연결하는 중이라 제어를 끕니다";
+  if (link === "mock") return "서버에 연결되지 않아 제어를 끕니다. 가상 데이터에는 보내지 않습니다";
+  const last = receivedAt === null ? "—" : clock(receivedAt);  // 마지막 수신 시각
+  return `연결이 끊겨 제어를 끕니다 · 마지막 수신 ${last} 기준`;
+}
+
+// 화면 위 멈춤 줄의 글. online 이면 null
+export function halt(link: Linkage, receivedAt: number | null): string | null {
+  return link === "online" ? null : stoppage(link, receivedAt);
+}
+
+// 제어마다 켜짐과 이유. 연결·재생·회차 상태 차례로 먼저 맞는 규칙이 이기고, 보내는 중이면 켜진 제어를 끔
+export function gates(
+  link: Linkage,
+  receivedAt: number | null,
+  snapshot: Snapshot | null,
+  sending: Control | null,  // 답을 기다리는 제어
+): Record<Control, Gate> {
+  if (link !== "online" || snapshot === null) {  // 응답 없이 online 이면 연결 중과 같음
+    const reason = stoppage(link === "online" ? "connecting" : link, receivedAt);
+    return blanket({ on: false, reason, cue: "halt" });
+  }
+  const replay = snapshot.dataSource === "replay";
+  if (sending !== null) {  // 제 이유로 꺼진 제어는 그 이유 줄을 둬 칸 높이가 그대로
+    const busy: Gate = { on: false, reason: `${wording(sending, replay)} 보내는 중입니다`, cue: "note" };
+    const rest = gates(link, receivedAt, snapshot, null);  // 보내기 전 판정
+    const hold = (gate: Gate) => (gate.on ? busy : gate);  // 켜진 제어만 끔
+    return {
+      start: hold(rest.start),
+      stop: hold(rest.stop),
+      reset: hold(rest.reset),
+      rain: hold(rest.rain),
+      blockage: hold(rest.blockage),
+      sim: hold(rest.sim),
+      live: hold(rest.live),
+    };
+  }
+  const run = snapshot.runState;
+  if (replay) {
+    return {
+      start: veto("재생 중에는 회차를 시작할 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다"),
+      stop: run === "running" ? ON : veto("재생이 멈춰 있습니다"),  // 대기·없음도 재생 정지로 봄
+      reset: veto("재생 중에는 초기화할 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다"),
+      rain: veto("재생 중에는 강우를 바꿀 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다"),
+      blockage: veto("재생 중에는 막힘을 바꿀 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다"),
+      sim: ON,
+      live: veto("재생 중에는 실측으로 바꿀 수 없습니다. 먼저 시뮬레이션으로 돌아갑니다"),
+    };
+  }
+  if (run === null || run === undefined) {
+    const unknown = veto("서버가 회차 상태를 보내지 않았습니다");
+    return { ...blanket(unknown), reset: ON, rain: ON, blockage: ON };
+  }
+  const running = run === "running";
+  const changeover = running  // 다른 입력원으로의 전환
+    ? veto("회차가 진행 중이라 입력원을 바꿀 수 없습니다. 먼저 종료합니다")
+    : ON;
+  return {
+    start: running ? veto("이미 진행 중입니다") : ON,
+    stop: running ? ON : veto("진행 중이 아닙니다"),
+    reset: ON,
+    rain: ON,
+    blockage: ON,
+    sim: snapshot.dataSource === "sim" ? veto("이미 시뮬레이션입니다") : changeover,
+    live: snapshot.dataSource === "live" ? veto("이미 실측입니다") : changeover,
+  };
+}
+
+// 확인 줄의 다음 상태와 보낼 제어. 묻기는 열기만, 예는 열린 줄을 보냄, 나머지는 닫음
+export function step(
+  open: Hazard | null,  // 지금 열린 확인 줄
+  press: Press,
+): { open: Hazard | null; send: Hazard | null } {
+  if (press.kind === "ask") return { open: press.control, send: null };
+  if (press.kind === "yes") return { open: null, send: open };
+  return { open: null, send: null };
+}
+
+// 앞뒤 빈칸을 지운 입력 글의 숫자. 빈칸이면 null, 숫자가 아니거나 무한이면 NaN
+function quantity(text: string): number | null {
+  const trimmed = text.trim();
+  if (trimmed === "") return null;
+  const value = Number(trimmed);
+  return Number.isFinite(value) ? value : Number.NaN;
+}
+
+// 강우 직접 입력 검사. 0 이상, 서버 상한 이하
+export function rate(text: string, max: number | null): Check {
+  if (max === null) return { ok: false, reason: "서버 강우 설정이 없어 직접 입력을 끕니다" };
+  const value = quantity(text);
+  if (value === null) return { ok: false, reason: `0 ~ ${max} 사이 숫자를 넣어 주세요` };
+  if (Number.isNaN(value)) return { ok: false, reason: "숫자만 넣을 수 있습니다" };
+  if (value < 0) return { ok: false, reason: "0 이상이어야 합니다" };
+  if (value > max) return { ok: false, reason: `${max} mm/h 이하만 됩니다` };
+  return { ok: true, value };
+}
+
+// 가상 데이터용 한계 수위 입력 검사. 0 보다 크고 500 mm 이하
+export function brim(text: string): Check {
+  const value = quantity(text);
+  if (value === null) return { ok: false, reason: "숫자를 넣어 주세요" };
+  if (Number.isNaN(value)) return { ok: false, reason: "숫자만 넣을 수 있습니다" };
+  if (value <= 0) return { ok: false, reason: "0 보다 커야 합니다" };
+  if (value > MAX_THRESHOLD_MM) return { ok: false, reason: `${MAX_THRESHOLD_MM} mm 이하만 됩니다` };
+  return { ok: true, value };
+}
+
+// 본문 없는 회차 제어와 입력원 제어의 요청
+export function command(control: "start" | "stop" | "reset" | "sim" | "live"): Command {
+  if (control === "sim") return { control, body: { mode: "sim" } };
+  if (control === "live") return { control, body: { mode: "live" } };
+  return { control, body: {} };
+}
+
+// 강우 요청. 단계 이름이면 단계, 숫자면 직접 입력(mm/h)
+export function shower(choice: Preset | number): Command {
+  if (typeof choice === "number") return { control: "rain", body: { mmPerHour: choice } };
+  return { control: "rain", body: { intensity: choice } };
+}
+
+// 막힘 요청. 부분·완전 막힘은 빗물받이가 있어야 함
+export function plug(kind: Blockage, inlet: string | null): Check<Command> {
+  if (kind === "none") return { ok: true, value: { control: "blockage", body: { type: "none" } } };
+  if (inlet === null) return { ok: false, reason: "막을 빗물받이를 골라 주세요" };
+  return { ok: true, value: { control: "blockage", body: { type: kind, location: inlet } } };
+}
+
+// 판정과 입력 검사를 합침. 꺼진 판정은 그대로, 검사 실패는 그 칸의 이유
+export function pass(gate: Gate, check: Check<unknown>): Gate {
+  if (!gate.on && gate.cue !== "note") return gate;  // 보내는 중(note)만 검사 실패에 자리를 내줌
+  return check.ok ? gate : veto(check.reason);
+}
+
+// 단추 이름. 재생 중 종료와 시뮬레이션 전환은 재생 쪽 이름
+export function wording(control: Control, replay: boolean): string {
+  if (replay && (control === "stop" || control === "sim")) return REPLAY_NAMES[control];
+  return CONTROL_NAMES[control];
+}
+
+const MODE_WORDS = { sim: "시뮬레이션", live: "실측" } as const;  // 입력원 전환 물음의 이름
+
+// 확인 줄의 물음. 누르면 무엇이 사라지는지 알림
+export function question(control: Hazard, snapshot: Snapshot): string {
+  const replay = snapshot.dataSource === "replay";
+  const tail = "대기로 돌아가고 강우·막힘 선택이 기본값이 됩니다";  // 입력원 전환 뒤 일
+  const wipe = "멈춘 회차의 마지막 화면도 지워집니다. 기록 파일은 남습니다";
+  if (control === "stop") {
+    if (replay) return "재생을 멈출까요? 멈춘 재생은 이어 볼 수 없습니다";
+    return "회차를 종료할까요? 비가 그치고 마지막 상태가 남습니다";
+  }
+  if (control === "reset") {
+    if (snapshot.runState === "idle") return "강우·막힘 선택만 기본값(보통 강우, 막힘 없음)으로 돌립니다";
+    return "회차를 끝내고 대기로 돌아가며 강우·막힘 선택이 기본값이 됩니다. 기록 파일은 남습니다";
+  }
+  if (control === "sim" && replay) return `재생을 끝내고 시뮬레이션으로 돌아갈까요? ${tail}`;
+  return `${MODE_WORDS[control]}으로 바꿀까요? ${tail}. ${wipe}`;
+}
+
+// 성공 글의 바뀐 것. 응답 상태로 씀
+function effect(control: Control, snapshot: Snapshot, replay: boolean): string {
+  if (control === "start") return `회차 시작 · ${snapshot.experimentId}`;
+  if (control === "stop") return replay ? "재생 멈춤" : "회차 종료";
+  if (control === "reset") return "초기화 · 대기";
+  if (control === "rain") return `강우 ${snapshot.rain.mmPerHour} mm/h`;
+  if (control === "blockage") return `막힘 설정 · ${snapshot.blockage.label}`;
+  if (control === "sim") return replay ? "재생 끝냄 · 입력원 시뮬레이션" : "입력원 시뮬레이션";
+  return "입력원 실측";
+}
+
+// 결과 줄의 종류와 글. 성공은 받은 시각, 실패는 실패 시각
+export function outcome(delivery: Delivery): { tone: Tone; text: string } {
+  const { control, answer, replay } = delivery;
+  if (answer.ok) {
+    const { snapshot, receivedAt } = answer.receipt;
+    const what = effect(control, snapshot, replay);  // 바뀐 것
+    return { tone: "ok", text: `반영 · ${what} · ${clock(receivedAt)} 수신` };
+  }
+  const name = wording(control, replay);
+  const at = clock(answer.at);  // 실패 시각
+  const { fault } = answer;
+  if (fault.kind === "refused") return { tone: "fail", text: `${name} 거절 · ${fault.text} · ${at}` };
+  if (fault.kind === "status") {
+    const what = fault.status === 422 ? "요청 모양 오류" : "서버 오류";  // 이유 없는 HTTP 실패
+    return { tone: "fail", text: `${name} 실패 · ${what} HTTP ${fault.status} · ${at}` };
+  }
+  if (fault.kind === "network") return { tone: "fail", text: `${name} 실패 · 서버에 닿지 못했습니다 · ${at}` };
+  if (fault.kind === "timeout") {
+    const rest = "5초 안에 답이 없었습니다. 반영됐는지는 다음 수신으로 확인합니다";
+    return { tone: "unsure", text: `${name} 응답 없음 · ${rest} · ${at}` };
+  }
+  const rest = "서버는 받았을 수 있습니다. 다음 수신으로 확인합니다";  // 200 인데 계약과 다름
+  return { tone: "unsure", text: `${name} 응답 모양 이상 · ${rest} · ${at}` };
+}
+
+// 칸의 이유 목록 한 줄. id 는 그 글을 처음 가진 이름의 것
+export interface Reason {
+  id: string;
+  text: string;
+}
+
+// 이유 목록에 적을 글. 켜짐·통과와 멈춤·결과 줄 자리의 이유는 null
+function grounds(item: Gate | Check<unknown>): string | null {
+  if ("on" in item) return !item.on && item.cue === "own" ? item.reason : null;
+  return item.ok ? null : item.reason;
+}
+
+// 칸의 이유 목록과 이름마다 가리킬 줄. 같은 글은 한 줄로 모음
+export function reasons(entries: readonly (readonly [string, Gate | Check<unknown>])[]): {
+  lines: Reason[];
+  links: Partial<Record<string, string>>;  // 이름마다 이유 줄 id. 이유가 없으면 빠짐
+} {
+  const lines: Reason[] = [];
+  const links: Partial<Record<string, string>> = {};
+  for (const [name, item] of entries) {
+    const text = grounds(item);
+    if (text === null) continue;
+    let line = lines.find((each) => each.text === text);
+    if (line === undefined) {
+      line = { id: `ops-why-${name}`, text };
+      lines.push(line);
+    }
+    links[name] = line.id;
+  }
+  return { lines, links };
+}
+
+// 한계 수위 칸의 보이는 글, 칸마다 검사, 저장 판정. 바뀐 값이 없으면 저장을 끔
+export function amendment(
+  draft: Partial<Record<Zone, string>>,  // 고치는 중인 글. 없는 칸은 저장값
+  saved: Readonly<Thresholds>,
+): { texts: Record<Zone, string>; checks: Record<Zone, Check>; save: Check<Thresholds> } {
+  const text = (id: Zone) => draft[id] ?? String(saved[id]);
+  const texts = { A: text("A"), B: text("B"), C: text("C") };
+  // 이유 글 앞에 구역 이름을 붙인 검사
+  const check = (id: Zone): Check => {
+    const result = brim(texts[id]);
+    return result.ok ? result : { ok: false, reason: `${id} 구역 · ${result.reason}` };
+  };
+  const checks = { A: check("A"), B: check("B"), C: check("C") };
+  const values: Thresholds = { ...saved };
+  for (const id of ZONE_IDS) {
+    const result = checks[id];
+    if (!result.ok) return { texts, checks, save: result };  // 처음 틀린 구역의 이유
+    values[id] = result.value;
+  }
+  const changed = ZONE_IDS.some((id) => values[id] !== saved[id]);
+  const save: Check<Thresholds> = changed
+    ? { ok: true, value: values }
+    : { ok: false, reason: "바뀐 값이 없습니다" };
+  return { texts, checks, save };
 }

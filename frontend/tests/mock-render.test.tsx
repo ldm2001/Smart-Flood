@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import Ops from "@/app/ops/page";
 import Home from "@/app/page";
 import { Panel, scene } from "@/components/MonitorView";
 import { entry, EMPTY_HISTORY } from "@/lib/derive";
@@ -14,6 +15,19 @@ const BASE = Date.UTC(2026, 9, 23, 1, 0, 0);  // 기준 시각 10:00:00 서울, 
 const AT = BASE + 70_000;  // 10:01:10. 예시의 A 가 44.9 mm 라 10초 예측이 한계를 넘음
 // 평면도·장치·타임라인·기록 칸의 제목
 const TITLES = ["도시 모형 상태", "현장 장치 상태", "위험 판단·시험용 문자", "이벤트 기록"];
+// 운영 화면에서 서버로 보내는 제어 단추
+const CONTROLS = [
+  "ops-start",
+  "ops-stop",
+  "ops-reset",
+  "ops-sim",
+  "ops-live",
+  "ops-rain-light",
+  "ops-rain-medium",
+  "ops-rain-heavy",
+  "ops-rain",
+  "ops-blockage",
+];
 // 사건 없는 구역의 타임라인 칸
 const BLANK = "위험 판단 — 문자 요청(SMS 예정) — 실제 도달(경보) — 선행 시간 —";
 
@@ -37,7 +51,13 @@ const answer = (patch: Partial<Snapshot> = {}): Snapshot => ({
 });
 
 // 아직 아무 응답도 실패도 없는 상태
-const WAITING: Feed = { latest: null, failed: false, history: EMPTY_HISTORY, thresholds: null };
+const WAITING: Feed = {
+  latest: null,
+  failed: false,
+  history: EMPTY_HISTORY,
+  thresholds: null,
+  rain: null,
+};
 const DOWN: Feed = { ...WAITING, failed: true };  // 한 번도 응답을 못 받고 실패한 상태
 // 응답과 받은 시각으로 통신 결과를 만드는 도우미
 const feed = (snapshot: Snapshot, receivedAt: number, extra: Partial<Feed> = {}): Feed => ({
@@ -45,6 +65,7 @@ const feed = (snapshot: Snapshot, receivedAt: number, extra: Partial<Feed> = {})
   failed: false,  // 실패 없음
   history: entry(EMPTY_HISTORY, snapshot),  // 빈 이력에 이 응답을 더한 이력
   thresholds: CONFIG,  // 서버가 준 한계
+  rain: null,  // 강우 설정은 관제 화면에 쓰지 않음
   ...extra,  // 추가로 받은 값으로 덮어씀
 });
 
@@ -68,6 +89,7 @@ describe("which screen to show", () => {
       samples: trail(now),  // 예시 이력
       thresholds: THRESHOLDS,  // 저장 설정의 한계
       receivedAt: null,  // 받은 시각 없음
+      failed: true,  // 첫 시도가 실패함
     });
   });
 
@@ -82,6 +104,7 @@ describe("which screen to show", () => {
       samples: polled.history.samples,  // 쌓인 이력
       thresholds: CONFIG,  // 서버가 준 한계
       receivedAt: AT + 300,  // 마지막 수신 시각
+      failed: true,  // 뒤의 폴링이 실패함
     });
   });
 
@@ -105,6 +128,20 @@ describe("check 9 and the screens", () => {
     expect(text).not.toContain("가상 데이터");  // 예시 안내 문구 없음
     expect(text).not.toContain("EXP-");  // 실험 번호 없음
     expect(text).not.toContain("가상 실측");  // 출처 문구 없음
+    expect(text).not.toMatch(/\d{2}:\d{2}:\d{2}/);  // 시각 모양 글자 없음
+  });
+
+  // 운영 화면도 서버 값·시각 없이 연결 중으로 그리고 서버 제어를 모두 끄는지 검사(판정 163)
+  it("prerenders the ops screen as connecting with every server control off", () => {
+    const html = renderToStaticMarkup(<Ops />);  // 운영 화면을 그린 마크업
+    const text = content(html);
+    expect(text).toContain("연결 중");  // 연결 배지
+    // 서버로 보내는 제어는 모두 꺼짐
+    for (const id of CONTROLS) {
+      expect(html).toMatch(new RegExp(`<button[^>]* id="${id}" aria-disabled="true"`));
+    }
+    expect(text).not.toContain("서버 미연결");  // 한계 수위 칸의 "가상 데이터용" 은 늘 보여 이 글로 봄
+    expect(text).not.toContain("EXP-");  // 실험 번호 없음
     expect(text).not.toMatch(/\d{2}:\d{2}:\d{2}/);  // 시각 모양 글자 없음
   });
 

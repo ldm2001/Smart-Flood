@@ -12,6 +12,7 @@ export const sourceSchema = z.enum(["measured", "simulated", "estimated", "repla
 export const blockageTypeSchema = z.enum(["none", "partial", "full"]);  // 막힘 종류: 없음·부분·전체
 export const dataSourceSchema = z.enum(["sim", "replay", "live"]);  // 입력원: 가상·재생·실측
 export const runStateSchema = z.enum(["idle", "running", "stopped"]);  // 실험 상태: 대기·진행·정지
+export const presetSchema = z.enum(["light", "medium", "heavy"]);  // 강우 단계: 약·보통·강
 
 const zone = z.looseObject({  // 구역 하나의 현재 상태(추가 필드는 허용)
   levelMm: level,  // 현재 수위(mm)
@@ -117,6 +118,22 @@ export type Horizons = z.infer<typeof horizons>;
 export type LogEvent = z.infer<typeof eventSchema>;
 // 단계 전환 사건 타입
 export type StageEvent = Extract<LogEvent, { kind: "stage" }>;
+// 강우 단계 타입
+export type Preset = z.infer<typeof presetSchema>;
+// 설정의 강우 단계값과 상한
+export interface Rainfall {
+  presets: Record<Preset, number>;  // 단계마다 mm/h
+  maxMmPerHour: number;  // 직접 입력 상한(mm/h)
+}
+// 제어 요청. 본문은 백엔드 요청 모델(extra forbid)과 같은 모양
+export type Command =
+  | { control: "start" | "stop" | "reset"; body: Record<string, never> }
+  | { control: "rain"; body: { intensity: Preset } | { mmPerHour: number } }
+  | { control: "blockage"; body: { type: "none" } | { type: "partial" | "full"; location: string } }
+  | { control: "sim"; body: { mode: "sim" } }
+  | { control: "live"; body: { mode: "live" } };
+// 제어 이름 타입
+export type Control = Command["control"];
 
 // 응답을 검사. 어긋나면 던지고 호출한 쪽(폴링)이 연결 오류로 처리
 export function contract(body: unknown): Snapshot {
@@ -139,4 +156,36 @@ export const configThresholdsSchema = z.looseObject({  // 설정 응답 중 구�
 export function ceilings(body: unknown): Record<Zone, number> {
   const { zones } = configThresholdsSchema.parse(body);
   return { A: zones.A.threshold_mm, B: zones.B.threshold_mm, C: zones.C.threshold_mm };
+}
+
+const presetMm = z.number().min(0);  // 강우 단계값(mm/h): 0 이상
+const rainfallSchema = z  // 설정의 강우 단계값(mm/h)과 직접 입력 상한. 모르는 칸은 남김
+  .looseObject({
+    rain_presets_mm_per_h: z.looseObject({ light: presetMm, medium: presetMm, heavy: presetMm }),
+    rain_max_mm_per_h: z.number().gt(0),
+  })
+  // 아는 세 단계만 상한과 견줌. 모르는 단계 키는 보지 않음
+  .refine(({ rain_presets_mm_per_h: p, rain_max_mm_per_h: max }) =>
+    [p.light, p.medium, p.heavy].every((value) => value <= max),
+  );
+const detailSchema = z.looseObject({ detail: z.string().min(1) });  // 409·503 의 이유 글
+const issuesSchema = z.looseObject({  // 422 의 검사 항목 목록
+  detail: z.array(z.looseObject({ msg: z.string().min(1), type: z.string().optional() })).min(1),
+});
+
+// 설정의 강우 단계값과 상한을 꺼냄. 모양이 틀리면 null
+export function rainfall(body: unknown): Rainfall | null {
+  const parsed = rainfallSchema.safeParse(body);
+  if (!parsed.success) return null;
+  const { light, medium, heavy } = parsed.data.rain_presets_mm_per_h;  // 아는 세 단계만 꺼냄
+  return { presets: { light, medium, heavy }, maxMmPerHour: parsed.data.rain_max_mm_per_h };
+}
+
+// 오류 응답의 이유 글. detail 글, 아니면 value_error 인 첫 msg, 둘 다 없으면 null
+export function cause(body: unknown): string | null {
+  const plain = detailSchema.safeParse(body);
+  if (plain.success) return plain.data.detail;
+  const issues = issuesSchema.safeParse(body);
+  const first = issues.success ? issues.data.detail[0] : null;  // 422 의 첫 항목
+  return first?.type === "value_error" ? first.msg : null;  // 영어 검증 글은 쓰지 않음
 }
