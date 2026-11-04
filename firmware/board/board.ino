@@ -581,7 +581,8 @@ void setup() {
     WiFi.mode(webOn ? WIFI_AP : WIFI_OFF);
   }
   if (!webOn) {
-    Serial.println("AP_PASS(secrets.h)가 없어 관제 화면과 펌프 제어를 열지 않음");
+    Serial.println("AP_PASS 가 없거나 8자 미만이라 SMART_FLOOD 와이파이와 관제 화면을 열지 않음");
+    Serial.println("같은 폴더의 secrets.h.example 을 secrets.h 로 복사해 다시 올리면 열림");
     return;
   }
   WiFi.softAP(AP_SSID, AP_PASS);
