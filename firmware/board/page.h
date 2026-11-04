@@ -27,7 +27,7 @@ a{color:#8fd0ff}
 <div class="kv"><span>예측 +10초 / +20초 / +30초</span><b id="pred">-</b></div>
 </div></div>
 <div class="card"><canvas id="cv" width="700" height="200"></canvas>
-<small>흰 선: 실측 수위 · 점선: 예측 · 가로선: 구역 침수 기준 높이</small></div>
+<small>흰 선: 실측 수위 · 점선: 예측 · 가로선: 구역 한계 수위</small></div>
 <div class="card"><div class="row" id="zones"></div></div>
 <div class="card"><b>예측 선행 시간 (이번 회차)</b>
 <table><thead><tr><th>구역</th><th>첫 경보</th><th>실제 침수</th><th>미리 알린 시간</th></tr></thead><tbody id="lead"></tbody>
@@ -38,8 +38,8 @@ a{color:#8fd0ff}
 <div class="kv"><span>경과</span><b id="el">-</b></div><div class="kv"><span>급수통</span><b id="flt">-</b></div></div>
 <button onclick="c('start')">새 실험 + 강우 시작</button><button onclick="c('rain')">강우 재개</button>
 <button onclick="c('manual')">펌프 수동 ON</button><button class="stop" onclick="c('stop')">정지</button></div>
-<div class="card"><b>기준 높이와 경보 (mm, 어항 바닥 = 0)</b><br>
-<label>A 낮은 도로 <input id="z0"></label><label>B 주택 골목 <input id="z1"></label><label>C 높은 광장 <input id="z2"></label>
+<div class="card"><b>한계 수위와 경보 (mm, 어항 바닥 = 0)</b><br>
+<label>A 낮은 상가 도로 <input id="z0"></label><label>B 주택 골목 <input id="z1"></label><label>C 높은 광장 <input id="z2"></label>
 <label>안전 최대 <input id="maxLevel"></label><br>
 <label>주의(초 이내) <input id="cautionEta"></label><label>경계(초 이내) <input id="warningEta"></label><br>
 <label>강우 ON(초) <input id="rainOnS"></label><label>강우 OFF(초) <input id="rainOffS"></label><br>
@@ -51,7 +51,7 @@ a{color:#8fd0ff}
 <button onclick="c('flowtest')">펌프 30초 돌리기</button><label>받은 양 <input id="flowml"> mL</label><button onclick="c('flowset','flowml')">유량 저장</button><br>
 <small>③ 수면 면적: 현재 <span id="area">-</span> cm², 이번 회차 추정 <span id="areaEst">-</span> cm²</small> <button onclick="c('areaapply')">추정값 적용</button></div>
 </main><script>
-const MODES=['정지','수동','강우','유량측정'],ST=['정상','주의','경계','침수'],ZN=['A 낮은 도로','B 주택 골목','C 높은 광장'];
+const MODES=['정지','수동','강우','유량측정'],ST=['정상','주의','경계','침수(경보)'],ZN=['A 낮은 상가 도로','B 주택 골목','C 높은 광장'];
 const q=i=>document.getElementById(i);let loaded=false,last=null;
 async function c(cmd,id){let u='/api/cmd?c='+cmd;if(id)u+='&v='+encodeURIComponent(q(id).value);await fetch(u);loaded=false;tick()}
 async function save(){const k=['z0','z1','z2','maxLevel','cautionEta','warningEta','rainOnS','rainOffS'];
@@ -66,7 +66,7 @@ async function tick(){try{const d=await (await fetch('/api/status')).json();
  q('lv').textContent=d.level.toFixed(0)+' mm';q('rate').textContent=(d.rate*60).toFixed(1)+' mm/분';q('rsrc').textContent=d.rsrc;
  q('pred').textContent=d.pred.map(v=>v.toFixed(0)).join(' / ')+' mm';q('route').textContent=d.fault?'수위센서 이상: 12V와 배선을 확인하세요':d.route;
  q('why').textContent=d.why?('정지 사유: '+d.why):'';
- q('zones').innerHTML=d.zones.map((z,i)=>`<div class="zone s${z.stage}"><h3>${ZN[i]} · ${ST[z.stage]}</h3>기준 ${d.cfg.zs[i]} mm<br>${z.eta==0?'침수됨':(z.eta<0?'상승 없음':'침수까지 '+Math.round(z.eta)+'초')}</div>`).join('');
+ q('zones').innerHTML=d.zones.map((z,i)=>`<div class="zone s${z.stage}"><h3>${ZN[i]} · ${ST[z.stage]}</h3>한계 ${d.cfg.zs[i]} mm<br>${z.eta==0?'침수됨':(z.eta<0?'상승 없음':'침수까지 '+Math.round(z.eta)+'초')}</div>`).join('');
  q('lead').innerHTML=d.zones.map((z,i)=>`<tr><td>${ZN[i]}</td><td>${fs(z.alertT)}</td><td>${fs(z.floodT)}</td><td>${z.alertT>=0&&z.floodT>=0?Math.round(z.floodT-z.alertT)+'초 전':'-'}</td></tr>`).join('');
  q('pump').textContent=d.pump?'ON':'OFF';q('mode').textContent=MODES[d.mode];q('el').textContent=Math.round(d.elapsed)+'초';
  q('flt').textContent=d.floatLow?'물 부족':'정상';q('mv').textContent=d.mv.toFixed(0);q('flow').textContent=d.cfg.flow.toFixed(1);
