@@ -14,7 +14,7 @@ from app.core.calibration import (
     drainage,
     waterline,
 )
-from app.core.danger import Rule, Watch, bulletin, patrol, shifts
+from app.core.danger import Rule, Watch, bulletin, patrol, shifts, slope
 from app.core.model import (
     BLOCKAGE_TYPES,
     ZONES,
@@ -262,6 +262,7 @@ class Experiment:
         self._ticks = 0
         self._state = baseline(self._params)
         self._latest: dict[str, tuple[float, float]] = {}  # 구역 → (관측 수위 m, 받은 경과 초)
+        self._trail: dict[str, tuple[tuple[float, float], ...]] = {}  # 구역 → 창 안 (경과 초, 수위)
         self._absent = frozenset()
         self._watch = {}
         self.source.origin()
@@ -276,6 +277,7 @@ class Experiment:
         self._ticks = 0
         self._state = baseline(self._params)
         self._latest = {}
+        self._trail = {}
         self._absent = frozenset()
         self._watch: dict[str, Watch] = {}  # 구역별 경보 감시 상태
 
@@ -441,6 +443,7 @@ class Experiment:
         self._ticks = 0
         self._state = baseline(self._params)
         self._latest = {}
+        self._trail = {}
         self._watch = {}
         self._run_state = "running"
         self.progress()  # 0 초의 조작을 먼저 적용
@@ -548,9 +551,21 @@ class Experiment:
         corrections = ()  # 보정 내역(없으면 비어 있음)
         if readings:
             state, corrections = adjustment(state, readings, self._gain, self._params)
-        depths = {z: depth(z, state.V[z], self._params) for z in ZONES}  # 보정된 모델 수위(m)
-        watch = patrol(self._watch, depths, rates, elapsed, self._rule)  # 구역별 경보 감시
+        levels = {z: depth(z, state.V[z], self._params) for z in ZONES}  # 보정된 모델 수위(m)
+        slopes = {z: rates[z] for z in ZONES}  # 판정용 변화율(기본은 모델)
         latest = {**self._latest, **{z: (h, elapsed) for z, h in readings.items()}}
+        window = self._rule.slope_window_s  # 실측 기울기 창(초)
+        trail = {}  # 구역별 유효 관측 (경과 초, 수위 m). 창 안만 남김
+        for z in ZONES:
+            fresh = [(elapsed, readings[z])] if z in readings else []
+            samples = (*self._trail.get(z, ()), *fresh)
+            trail[z] = tuple(s for s in samples if elapsed - s[0] <= window)
+        # 실측 판정 입력원이면 신선한 실측 구역은 실측 수위·기울기로 판정
+        if self._data_source in self._rule.measured_sources:
+            for z, (h, t) in latest.items():
+                if elapsed - t <= self._max_age_s:  # capture 와 같은 신선도
+                    levels[z], slopes[z] = max(0.0, h), slope(trail[z], window) or 0.0
+        watch = patrol(self._watch, levels, slopes, elapsed, self._rule)  # 구역별 경보 감시
         snapshot = self.capture(state, elapsed, latest, absent, watch)
         record = frame(snapshot, state, corrections)
         notices = [  # 단계가 바뀐 구역의 stage 사건 줄
@@ -561,7 +576,7 @@ class Experiment:
             with shield():  # 입출력 오류는 503 으로
                 lines = [*observations, record, *notices]  # obs·state·event 줄을 한 tick 에 함께
                 self.experiment_log.batch(self._experiment_id, lines)  # 다 쓰이거나 하나도 안 쓰임
-        self._state, self._latest, self._absent = state, latest, absent
+        self._state, self._latest, self._absent, self._trail = state, latest, absent, trail
         self._watch, self._snapshot = watch, snapshot
         self._ticks += 1
         if self._replay is None:  # 재생 중에는 알리지 않음(알림 포트의 약속)

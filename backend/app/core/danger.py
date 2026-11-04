@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from app.core.model import ZONES, guard
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 STAGES = ("safe", "caution", "warning", "evacuate")  # 정상·주의·경계·침수. 뒤가 높음
@@ -16,6 +17,8 @@ class Rule:
     warning_eta_s: float
     release_ratio: float
     release_hold_s: float
+    slope_window_s: float = 20.0  # 실측 기울기 창(초)
+    measured_sources: frozenset[str] = frozenset()  # 실측 수위로 판정할 입력원
 
     # config 의 zones.*.threshold_mm 와 alerts 로 규칙을 만듦. 쓸 수 없는 값은 ValueError
     @classmethod
@@ -31,7 +34,35 @@ class Rule:
         guard(ok, "경계 도달 상한은 0 초과, 주의 도달 상한 이하여야 한다")
         guard(0 < ratio <= 1, "해제 비율은 0 초과 1 이하여야 한다")
         guard(math.isfinite(hold) and hold >= 0, "유지 시간은 0 이상 유한해야 한다")
-        return cls(thresholds, float(caution), float(warning), float(ratio), float(hold))
+        window = alerts.get("slope_window_s", 20.0)
+        sources = alerts.get("measured_sources", [])
+        ok = isinstance(window, (int, float)) and math.isfinite(window) and window > 0
+        guard(ok, "기울기 창은 0 초과 유한해야 한다")
+        ok = isinstance(sources, list) and all(isinstance(s, str) for s in sources)
+        guard(ok, "실측 판정 입력원은 문자열 목록이어야 한다")
+        return cls(
+            thresholds,
+            float(caution),
+            float(warning),
+            float(ratio),
+            float(hold),
+            float(window),
+            frozenset(sources),
+        )
+
+
+# (경과 초, 수위 m) 표본 중 마지막에서 window_s 안의 것으로 최소제곱 기울기(m/s)를 냄. 모자라면 None
+def slope(samples: Sequence[tuple[float, float]], window_s: float) -> float | None:
+    if not samples:
+        return None
+    latest = max(t for t, _ in samples)
+    kept = [(t, h) for t, h in samples if latest - t <= window_s]  # 창 안 표본
+    mean_t = sum(t for t, _ in kept) / len(kept)
+    mean_h = sum(h for _, h in kept) / len(kept)
+    spread = sum((t - mean_t) ** 2 for t, _ in kept)  # 시간 분산(0 이면 기울기 없음)
+    if len(kept) < 2 or spread == 0:
+        return None
+    return sum((t - mean_t) * (h - mean_h) for t, h in kept) / spread
 
 
 # 구역 하나의 감시 상태: 단계, 도달 예상 초(안 오르면 None), 내림 유지가 시작된 경과 초

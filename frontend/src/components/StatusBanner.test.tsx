@@ -18,6 +18,17 @@ describe("Headline", () => {
     expect(content(html)).toContain("[triangle] 경계 A 낮은 상가 도로 · 약 10초 후 침수 예상");
   });
 
+  // 서버 alerts 로 만든 대피 안내 한 줄을 보이는지 검사
+  it("shows the evacuation guidance line", () => {
+    const html = renderToStaticMarkup(
+      <Headline
+        banner={{ stage: "warning", zoneId: "B", message: "B 주택 골목 · 침수 위험" }}
+        guide="B 주택 골목 위험: C 높은 광장으로 대피하세요"
+      />,
+    );
+    expect(content(html)).toContain("B 주택 골목 · 침수 위험 B 주택 골목 위험: C 높은 광장으로 대피하세요");
+  });
+
   // 자료가 오기 전에는 중립 문구로 기다리는지 검사
   it("waits with a neutral message before there is data", () => {
     const html = renderToStaticMarkup(<Headline banner={null} />);

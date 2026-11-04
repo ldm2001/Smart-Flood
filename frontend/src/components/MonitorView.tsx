@@ -5,6 +5,7 @@ import {
   clock,
   expiry,
   roster,
+  route,
   scope,
   ZONE_IDS,
   type Sample,
@@ -82,6 +83,7 @@ export function Panel(props: Scene & { events?: Events }) {
   const snapshot = data?.snapshot ?? null;
   const statuses = snapshot ? roster(snapshot.alerts) : null;  // 서버 alerts 로 구역별 단계를 구함
   const banner = snapshot && statuses ? caption(statuses, snapshot.zones) : null;
+  const guide = snapshot ? route(snapshot.alerts) : null;  // 서버 alerts 로 만든 대피 안내
   const meta = snapshot?.predictionMeta;  // 예측 기준 정보(기준 시각·유효 초)
   const expired = data !== null && meta ? expiry(data.now, Date.parse(meta.basisTime), meta.validForSec) : false;
   const runState = snapshot?.runState;
@@ -138,7 +140,7 @@ export function Panel(props: Scene & { events?: Events }) {
         </div>
       </header>
 
-      <Headline banner={banner} />
+      <Headline banner={banner} guide={guide} />
 
       {// 구역별 수위 카드 묶음(넓으면 3칸)
       }
