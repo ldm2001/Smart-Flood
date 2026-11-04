@@ -285,3 +285,33 @@ def test_replay_refuses_arming_and_the_test_message(builder, config, clock):
     assert client.post(ARM_URL, json={"armed": False}).status_code == 200
     lapse(clock, service, 40)
     assert phone.calls == []
+
+
+# 무장 전 사건은 기록만이고, 무장 뒤 같은 구역·단계 사건은 발송되는지 검사
+def test_an_event_before_arming_does_not_block_the_send_after(config, caplog):
+    once, phone = Phone(), Phone()
+    armed(config, once).notice(shift("warning", "caution"))  # 무장 상태 한 건의 호출 수
+    dispatch = Dispatch(settings(config), KEYS, phone, runner=direct)
+    with caplog.at_level(logging.WARNING):
+        dispatch.notice(shift("warning", "caution"))  # 무장 전
+    assert phone.calls == []
+    assert any(n.startswith("SMS 예정") for n in notes(caplog))
+    dispatch.arm(True)
+    dispatch.notice(shift("warning", "caution"))  # 무장 뒤 같은 구역·단계
+    assert len(phone.calls) == len(once.calls) > 0
+
+
+# 무장 전 사건은 실험당 건수를 쓰지 않고 상한은 그대로인지 검사
+def test_events_before_arming_keep_the_experiment_cap(config, caplog):
+    assert settings(config)["max_sms_per_experiment"] == 10
+    once, phone = Phone(), Phone()
+    armed(config, once).notice(shift("warning", "caution"))
+    dispatch = Dispatch(settings(config, max_sms_per_experiment=2), KEYS, phone, runner=direct)
+    for zone in ("A", "B", "C"):
+        dispatch.notice(shift("warning", "caution", zone=zone))  # 무장 전 세 건
+    dispatch.arm(True)
+    with caplog.at_level(logging.WARNING):
+        for zone in ("A", "B", "C"):
+            dispatch.notice(shift("warning", "caution", zone=zone))
+    assert len(phone.calls) == 2 * len(once.calls)
+    assert "SMS 상한 EXP-1: C 구역 warning, 실험당 2 건" in notes(caplog)

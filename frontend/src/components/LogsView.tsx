@@ -6,6 +6,7 @@ import useSWR from "swr";
 import { logbook, order, records } from "@/lib/api";
 import {
   clock,
+  closure,
   gates,
   halt,
   linkage,
@@ -315,7 +316,7 @@ function Detail(props: Stack) {
       </section>
       {!gone && (
         <>
-          <Compare events={props.events} />
+          <Compare events={props.events} ended={closure(props.snapshot, props.id)} />
           <Timeline log={{ list: props.events, failed: props.lost }} past />
         </>
       )}

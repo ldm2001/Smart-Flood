@@ -805,3 +805,36 @@ export function relay(notifier: Notifier | null | undefined, past = false): stri
   if (notifier?.mode === "sms" && notifier.armed) return "실제 발송 켜짐, 허용 번호만";
   return "기록만, 실제 발송 차단";
 }
+
+// 현재 서버 경보로 대피 안내 한 줄 만듦. C·B·A 순으로 우선함
+export function route(alerts: readonly Alert[]): string {
+  const hit = (zone: Zone) => alerts.some((alert) => alert.zone === zone);  // 그 구역 경보 여부
+  if (hit("C")) return "C 높은 광장까지 위험: 실험을 멈추세요";
+  if (hit("B")) return "B 주택 골목 위험: C 높은 광장으로 대피하세요";
+  if (hit("A")) return "A 낮은 상가 도로 위험: 경로 B 로 우회하세요";
+  return "정상: 경로 A 이용 가능";
+}
+
+// 구역 한 줄의 판정 글(적중·누락·오경보·대기·줄표). ended 는 실험이 끝났는지
+export function mark(line: Tally, ended: boolean): string {
+  const ahead = line.lead !== null && line.lead > 0;  // 위험 판단이 실제 도달보다 앞섰는지
+  if (line.arrival !== null) return line.judgement !== null && ahead ? "적중" : "누락";
+  if (line.judgement !== null) return ended ? "오경보" : "대기";
+  return "—";
+}
+
+// 판정 줄들의 적중·누락·오경보 수 글 만듦
+export function score(lines: readonly Tally[], ended: boolean): string {
+  const marks = lines.map((line) => mark(line, ended));
+  const count = (word: string) => marks.filter((each) => each === word).length;  // 그 판정 줄 수
+  return `적중 ${count("적중")} · 누락 ${count("누락")} · 오경보 ${count("오경보")}`;
+}
+
+// 고른 기록의 실험이 끝났는지. 지금 진행 중인 실험이거나 상태·번호를 모르면 끝나지 않은 것으로 봄
+export function closure(
+  snapshot: Pick<Snapshot, "experimentId" | "runState"> | null,
+  id: string | null,
+): boolean {
+  if (snapshot === null || id === null) return false;
+  return snapshot.experimentId !== id || snapshot.runState !== "running";
+}

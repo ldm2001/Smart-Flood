@@ -88,6 +88,22 @@ def test_live_level_far_above_the_model_keeps_the_run_going(client, clock, servi
     assert all(-20 <= zone["rateMmSec"] <= 20 for zone in body["zones"].values())
 
 
+# live 에서 A 실측이 0 부터 약 1 mm/s 로 오르면 모델 수위와 관계없이 주의, 40 mm 부터 침수인지 검사
+def test_rising_live_level_raises_the_alert_from_the_measurement(client, clock, service, config):
+    client.post("/api/source", json=LIVE)
+    client.post(START, json={})
+    stages = {}  # 보낸 A 수위(mm) → 그 tick 뒤 A 경보
+    for seq in range(1, 46):
+        client.post("/api/ingest", json=message(config, seq, a_mm=float(seq - 1)))
+        lapse(clock, service, 1)
+        alerts = client.get("/api/state").json()["alerts"]
+        stages[seq - 1] = next((a for a in alerts if a["zone"] == "A"), None)
+    early = stages[5]  # 5 mm, 1 mm/s 면 한계까지 35 초라 주의
+    assert early is not None and early["stage"] == "caution" and early["etaSec"] <= 60
+    assert stages[15]["stage"] == "warning"  # 15 mm 면 25 초라 경계
+    assert stages[40]["stage"] == "evacuate"  # 한계 40 mm 도달
+
+
 # 장치 상태: 마지막 수신 뒤 5초 전이면 online, 5초부터 offline. 안 보내는 esp32_2 는 offline
 def test_devices_follow_the_last_receipt(client, clock, service, config):
     client.post("/api/source", json=LIVE)

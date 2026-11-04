@@ -3,7 +3,7 @@ import { STAGE_ICONS, STAGE_LABELS } from "@/lib/layout-data";
 import { Glyph } from "./Glyph";
 
 // 머리글 컴포넌트. 문구는 caption 이 서버 alerts 로 만든 값. 주의 이상만 바탕·테두리를 켬
-export function Headline({ banner }: { banner: Banner | null }) {
+export function Headline({ banner, guide = null }: { banner: Banner | null; guide?: string | null }) {
   return (
     <section
       aria-live="polite"  // 바뀐 내용을 화면 낭독기가 읽게
@@ -20,6 +20,9 @@ export function Headline({ banner }: { banner: Banner | null }) {
         {// 경보 문구. 배너가 없으면 기다리는 중 안내
         }
         <h2 className="text-2xl leading-snug font-medium">{banner?.message ?? "수위 자료를 기다리는 중입니다"}</h2>
+        {// 대피 안내. route 가 서버 alerts 로 만든 한 줄
+        }
+        {guide && <p className="mt-1 text-base text-muted">{guide}</p>}
       </div>
     </section>
   );

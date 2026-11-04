@@ -11,11 +11,17 @@ from app.core.danger import (
     outlook,
     patrol,
     shifts,
+    slope,
     verdict,
 )
 from app.core.model import ZONES
 
 BAD_RULE_CONFIGS = {  # 이름 → 설정을 망가뜨리는 함수. 전부 시작 때 ValueError 여야 함
+    "window-zero": lambda c: c["alerts"].update(slope_window_s=0),
+    "window-infinite": lambda c: c["alerts"].update(slope_window_s=math.inf),
+    "window-text": lambda c: c["alerts"].update(slope_window_s="20"),
+    "sources-text": lambda c: c["alerts"].update(measured_sources="live"),
+    "sources-number": lambda c: c["alerts"].update(measured_sources=[1]),
     "threshold-zero": lambda c: c["zones"]["A"].update(threshold_mm=0),
     "threshold-negative": lambda c: c["zones"]["B"].update(threshold_mm=-1),
     "threshold-nan": lambda c: c["zones"]["C"].update(threshold_mm=math.nan),
@@ -76,7 +82,7 @@ def test_stages_rank_from_safe_to_evacuate():
 # 설정의 구역 한계(mm → m)와 경보 시간을 읽는지 검사
 def test_rule_reads_thresholds_in_metres_and_alert_timings(config):
     rule = Rule.config(config)
-    assert rule.thresholds_m == pytest.approx({"A": 0.040, "B": 0.070, "C": 0.110})
+    assert rule.thresholds_m == pytest.approx({"A": 0.040, "B": 0.050, "C": 0.050})
     assert (rule.caution_eta_s, rule.warning_eta_s) == (60, 30)
     assert (rule.release_ratio, rule.release_hold_s) == (0.9, 10)
 
@@ -167,7 +173,7 @@ def test_zero_hold_lowers_the_stage_at_once(config):
 # 구역마다 제 한계로 판정하고, 없는 구역은 정상에서 시작하는지 검사
 def test_patrol_grades_every_zone_with_its_own_threshold(config):
     rule = Rule.config(config)
-    levels = {"A": 0.0, "B": 0.069, "C": 0.110}
+    levels = {"A": 0.0, "B": 0.049, "C": 0.050}
     rates = {"A": 0.0, "B": 0.001, "C": -0.001}
     watches = patrol({}, levels, rates, 7.0, rule)
     assert set(watches) == set(ZONES)
@@ -203,3 +209,33 @@ def test_shifts_lists_zones_whose_stage_changed():
     assert shifts({}, {"A": Watch(), "B": Watch(), "C": Watch("caution", 0.4, None)}) == [
         ("C", "safe", "caution", 1)
     ]
+
+
+# 기울기 창·실측 판정 입력원을 config 에서 읽고, 없으면 기본값(20 초, 빈 집합)인지 검사
+def test_rule_reads_the_slope_window_and_measured_sources(config):
+    rule = Rule.config(config)
+    assert (rule.slope_window_s, rule.measured_sources) == (20.0, frozenset({"live"}))
+    keys = ("slope_window_s", "measured_sources")
+    bare = Rule.config(spoiled(config, lambda c: [c["alerts"].pop(k) for k in keys]))
+    assert (bare.slope_window_s, bare.measured_sources) == (20.0, frozenset())
+
+
+# 곧은 직선 표본의 기울기가 정확히 그 직선의 기울기인지 검사
+def test_slope_of_a_straight_line_is_exact():
+    samples = [(t, 0.001 * t + 0.005) for t in range(1, 11)]  # 1 mm/s
+    assert slope(samples, 20.0) == pytest.approx(0.001)
+
+
+# 마지막 표본에서 창보다 오래된 표본은 기울기에서 빠지는지 검사
+def test_slope_keeps_only_samples_within_the_window():
+    samples = [(0.0, 0.5), (10.0, 0.0), (20.0, 0.01), (30.0, 0.02)]  # 0 초 표본은 창 밖
+    assert slope(samples, 20.0) == pytest.approx(0.001)
+
+
+# 표본이 2 개 미만이거나 시간 폭이 0 이면 None 인지 검사
+@pytest.mark.parametrize(
+    "samples",
+    [[], [(5.0, 0.01)], [(0.0, 0.0), (30.0, 0.03)], [(3.0, 0.01), (3.0, 0.02)]],
+)
+def test_slope_without_enough_samples_is_none(samples):
+    assert slope(samples, 20.0) is None
