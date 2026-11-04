@@ -110,6 +110,9 @@ class Dispatch:
         experiment = str(event.get("experimentId"))
         at = datetime.fromisoformat(event["time"])  # 사건 시각(+09:00)
         body = message.text(stage, zone, int(event.get("etaSec") or 0), at)
+        if not self.live:  # 무장 전·설정 없음은 기록만(중복 키·건수 안 씀)
+            log.warning("SMS 예정(%s) %s: %s", self.reason, experiment, body)
+            return
         with self._lock:
             key = (experiment, zone, stage)
             if key in self._seen:
@@ -120,9 +123,6 @@ class Dispatch:
                 log.warning("SMS 상한 %s: %s 구역 %s, 실험당 %d 건", experiment, zone, stage, used)
                 return
             self._counts[experiment] = used + 1
-        if not self.live:
-            log.warning("SMS 예정(%s) %s: %s", self.reason, experiment, body)
-            return
         for number in self._to:
             if message.digits(number) not in self._keys.allowed:  # 보내기 시도 자체를 안 함
                 log.warning("SMS 차단 %s %s: 허용 번호가 아니다", experiment, message.mask(number))

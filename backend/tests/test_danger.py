@@ -76,7 +76,7 @@ def test_stages_rank_from_safe_to_evacuate():
 # 설정의 구역 한계(mm → m)와 경보 시간을 읽는지 검사
 def test_rule_reads_thresholds_in_metres_and_alert_timings(config):
     rule = Rule.config(config)
-    assert rule.thresholds_m == pytest.approx({"A": 0.040, "B": 0.070, "C": 0.110})
+    assert rule.thresholds_m == pytest.approx({"A": 0.040, "B": 0.050, "C": 0.050})
     assert (rule.caution_eta_s, rule.warning_eta_s) == (60, 30)
     assert (rule.release_ratio, rule.release_hold_s) == (0.9, 10)
 
@@ -167,7 +167,7 @@ def test_zero_hold_lowers_the_stage_at_once(config):
 # 구역마다 제 한계로 판정하고, 없는 구역은 정상에서 시작하는지 검사
 def test_patrol_grades_every_zone_with_its_own_threshold(config):
     rule = Rule.config(config)
-    levels = {"A": 0.0, "B": 0.069, "C": 0.110}
+    levels = {"A": 0.0, "B": 0.049, "C": 0.050}
     rates = {"A": 0.0, "B": 0.001, "C": -0.001}
     watches = patrol({}, levels, rates, 7.0, rule)
     assert set(watches) == set(ZONES)
