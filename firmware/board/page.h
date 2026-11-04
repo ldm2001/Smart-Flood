@@ -32,7 +32,7 @@ a{color:#8fd0ff}
 <div class="card"><b>예측 선행 시간 (이번 회차)</b>
 <table><thead><tr><th>구역</th><th>첫 경보</th><th>실제 침수</th><th>미리 알린 시간</th></tr></thead><tbody id="lead"></tbody>
 </table>
-<small><a href="/log.csv">이번 회차 기록 CSV 내려받기</a></small></div>
+<small>미리 알린 시간: 현재 수위 경보(실제 침수 순간)보다 먼저 알린 시간. <a href="/log.csv">이번 회차 기록 CSV 내려받기</a></small></div>
 <div class="card"><div class="row">
 <div class="kv"><span>펌프</span><b id="pump">-</b></div><div class="kv"><span>모드</span><b id="mode">-</b></div>
 <div class="kv"><span>경과</span><b id="el">-</b></div><div class="kv"><span>급수통</span><b id="flt">-</b></div></div>
