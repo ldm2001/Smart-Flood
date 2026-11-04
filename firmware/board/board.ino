@@ -405,21 +405,48 @@ void sendIngest() {
   http.end();
 }
 
-// 쌓인 알림을 시리얼에 찍고, 주제가 있으면 ntfy 로 보냄
+QueueHandle_t pushQ = nullptr;  // ntfy 전송 대기열(글 사본 포인터)
+bool pushDrop = false;          // 대기열 가득 참 안내 1회 여부
+
+// ntfy 전송 태스크. 대기열의 글을 HTTPS 로 보냄(loop·control 과 따로 돎)
+void pushTask(void*) {
+  for (;;) {
+    char* msg = nullptr;
+    if (xQueueReceive(pushQ, &msg, portMAX_DELAY) != pdTRUE || !msg) continue;
+    if (WiFi.status() == WL_CONNECTED) {
+      WiFiClientSecure cli;
+      cli.setInsecure();  // 인증서를 확인하지 않음(설계서 방식). 알림 글만 나감
+      HTTPClient http;
+      http.setTimeout(3000);
+      if (http.begin(cli, String("https://ntfy.sh/") + NTFY_TOPIC)) {
+        http.addHeader("Content-Type", "text/plain; charset=utf-8");
+        http.POST((uint8_t*)msg, strlen(msg));
+        http.end();
+      }
+    }
+    free(msg);
+  }
+}
+
+// 쌓인 알림을 시리얼에 찍고, 주제가 있으면 ntfy 대기열에 넣음(가득 차면 버림)
 void sendPush() {
   if (pendingPush.length() == 0) return;
   String msg = pendingPush;
   pendingPush = "";
   Serial.println("[ALERT] " + msg);
   if (!*NTFY_TOPIC || WiFi.status() != WL_CONNECTED) return;
-  WiFiClientSecure cli;
-  cli.setInsecure();  // 인증서를 확인하지 않음(설계서 방식). 알림 글만 나감
-  HTTPClient http;
-  http.setTimeout(3000);
-  if (!http.begin(cli, String("https://ntfy.sh/") + NTFY_TOPIC)) return;
-  http.addHeader("Content-Type", "text/plain; charset=utf-8");
-  http.POST((uint8_t*)msg.c_str(), msg.length());
-  http.end();
+  if (!pushQ) {
+    pushQ = xQueueCreate(4, sizeof(char*));
+    if (!pushQ) return;
+    xTaskCreatePinnedToCore(pushTask, "push", 8192, nullptr, 1, nullptr, 0);
+  }
+  char* copy = strdup(msg.c_str());
+  if (!copy) return;
+  if (xQueueSend(pushQ, &copy, 0) != pdTRUE) {
+    free(copy);
+    if (!pushDrop) Serial.println("[ALERT] ntfy 대기열 가득 참: 알림 버림");
+    pushDrop = true;
+  }
 }
 
 // ===== 관제 화면 =====
