@@ -379,7 +379,7 @@ REV15 부품(푸시 버튼 GPIO25, JSN-SR04T GPIO5·18, HX711 GPIO32·33)은 REV
 
 펌프가 멈추는 조건: 플로트가 "물 모자람"이면 100 ms 안에, 수위센서 이상이면 강우 모드에서, 안전 최대 수위에 닿으면, 연속 가동이 60초를 넘으면, 회차가 1800초를 넘으면. 수동·유량 측정 모드는 센서 이상을 보지 않고 가동 제한으로만 멈춘다.
 
-서버에는 1초마다 `POST /api/ingest` 로 `distA_mm = 600 - 수위` 를 보낸다. 600 은 `INSTALL_HEIGHT_MM` 이고 `backend/config.yaml` 의 `sensors.A.install_height_mm` 와 같아야 한다. B 구역과 무게는 `null`·`absent`, 센서 이상이면 `distA_mm` 가 `null` 이고 `A` 가 `fault` 다. 서버가 꺼져 있어도 연결·읽기 제한이 각 400 ms 라 펌프 제어 루프가 오래 막히지 않는다. ntfy 는 TLS 인증서를 확인하지 않고(`setInsecure`) 보낸다.
+서버에는 1초마다 `POST /api/ingest` 로 `distA_mm = 600 - 수위` 를 보낸다. 600 은 `INSTALL_HEIGHT_MM` 이고 `backend/config.yaml` 의 `sensors.A.install_height_mm` 와 같아야 한다. B 구역과 무게는 `null`·`absent`, 센서 이상이면 `distA_mm` 가 `null` 이고 `A` 가 `fault` 다. 플로트 스위치는 `floatSwitch` 로 함께 보낸다. 급수통 물이 모자라면 `low`, 아니면 `normal` 이다. 서버가 꺼져 있어도 연결·읽기 제한이 각 400 ms 라 펌프 제어 루프가 오래 막히지 않는다. ntfy 는 TLS 인증서를 확인하지 않고(`setInsecure`) 보낸다.
 
 와이파이가 끊기면 10초는 ESP32 코어의 자동 재접속에 맡기고, 그 뒤로는 10초(`REJOIN_MS`)마다 다시 붙어 본다. 부팅 때 공유기를 못 찾은 경우도 같다. 붙지 않은 동안에는 서버 전송과 ntfy 만 건너뛰고 수위 측정·펌프 제어·알림 판단은 그대로 돈다.
 
