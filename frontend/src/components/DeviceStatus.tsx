@@ -55,8 +55,8 @@ export function Devices({ snapshot }: { snapshot: Snapshot | null }) {
       }
       <p className="mt-4 text-base leading-normal text-muted">
         가상·재생 입력에서는 장치 값이 늘 정상으로 나옵니다. 실측 입력에서는 마지막 메시지 뒤
-        5초 안의 장치만 정상이고, 한 번도 오지 않은 장치는 끊김, 플로트 스위치·비상정지는
-        메시지에 없어 미상으로 보입니다.
+        5초 안의 장치만 정상이고, 한 번도 오지 않은 장치는 끊김, 플로트 스위치는 보드가 보낸
+        정상·물 부족, 비상정지는 메시지에 없어 미상으로 보입니다.
       </p>
       <p className="mt-1 text-base leading-normal text-muted">웹 화면은 안전 차단을 대신하지 않습니다.</p>
     </section>

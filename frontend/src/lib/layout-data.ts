@@ -110,6 +110,7 @@ export const DEVICE_NAMES: Record<Device, string> = {  // 장치 표시 이름
 export const DEVICE_LABELS = {  // 장치 값 표시 글. 목록에 없는 값은 그대로 보임
   online: "정상",
   normal: "정상",
+  low: "물 부족",  // 실측 플로트의 물 부족. 보드가 펌프를 멈춤
   offline: "끊김",
   unknown: "미상",
 } as const;

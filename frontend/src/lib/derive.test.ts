@@ -612,6 +612,7 @@ describe("devices", () => {
     expect(condition("normal")).toEqual({ label: "정상", ok: true });
     expect(condition("offline")).toEqual({ label: "끊김", ok: false });
     expect(condition("unknown")).toEqual({ label: "미상", ok: false });
+    expect(condition("low")).toEqual({ label: "물 부족", ok: false });  // 실측 플로트 물 부족
     expect(condition("tripped")).toEqual({ label: "tripped", ok: false });
     expect(condition("constructor")).toEqual({ label: "constructor", ok: false });
   });
@@ -625,6 +626,7 @@ describe("devices", () => {
       emergencyStop: "unknown",
     };
     expect(readiness(rev16)).toBe(false);
+    expect(readiness({ ...LIVE.devices, floatSwitch: "low" })).toBe(false);  // 물 부족이면 확인
   });
 });
 

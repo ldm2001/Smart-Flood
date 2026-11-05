@@ -72,6 +72,12 @@ describe("stateSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("keeps floatSwitch an open string so live low passes", () => {
+    expect(stateSchema.safeParse(variant((b) => (b.devices.floatSwitch = "low"))).success).toBe(true);
+    expect(stateSchema.safeParse(variant((b) => (b.devices.floatSwitch = "jammed"))).success).toBe(true);
+    expect(stateSchema.safeParse(variant((b) => (b.devices.floatSwitch = 1))).success).toBe(false);
+  });
+
   it("rejects levelMm 501 and accepts the 0 and 500 edges", () => {
     expect(stateSchema.safeParse(variant((b) => (b.zones.A.levelMm = 501))).success).toBe(false);
     expect(stateSchema.safeParse(variant((b) => (b.zones.A.levelMm = 500))).success).toBe(true);

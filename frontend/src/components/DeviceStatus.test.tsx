@@ -19,8 +19,8 @@ const REV16 = {  // REV16 실측 입력의 장치 값
 };
 const NOTE =
   "가상·재생 입력에서는 장치 값이 늘 정상으로 나옵니다. 실측 입력에서는 마지막 메시지 뒤 " +
-  "5초 안의 장치만 정상이고, 한 번도 오지 않은 장치는 끊김, 플로트 스위치·비상정지는 " +
-  "메시지에 없어 미상으로 보입니다.";
+  "5초 안의 장치만 정상이고, 한 번도 오지 않은 장치는 끊김, 플로트 스위치는 보드가 보낸 " +
+  "정상·물 부족, 비상정지는 메시지에 없어 미상으로 보입니다.";
 const LOCK = '<span class="chip border border-line">출력 잠금</span>';
 const draw = (snapshot: Snapshot | null) => renderToStaticMarkup(<Devices snapshot={snapshot} />);
 
@@ -54,6 +54,15 @@ describe("Devices", () => {
       expect(text).toContain(part);
     }
     expect(text).not.toContain("보호 입력 정상");
+    expect(html).toContain('<p class="text-lg font-medium text-amber">');
+  });
+
+  it("marks a low live float switch as water shortage", () => {
+    const html = draw({ ...SIM, dataSource: "live", devices: { ...REV16, floatSwitch: "low" } });
+    const text = content(html);
+    expect(text).toContain("[alert] 보호 상태 확인");
+    expect(text).toContain("[alert] 플로트 스위치 · 물 부족");
+    expect(text).not.toContain("플로트 스위치 · low");
     expect(html).toContain('<p class="text-lg font-medium text-amber">');
   });
 
