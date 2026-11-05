@@ -65,6 +65,7 @@ SIM_DEVICES = {
     "floatSwitch": "normal",  # 플로트 스위치: 정상
     "emergencyStop": "normal",  # 비상 정지: 정상
 }
+FLOAT_STATES = ("normal", "low")  # 플로트 스위치 값: 물 있음, 물 부족(4.3). 그 밖은 unknown
 
 
 # 값이 이 실험 구성에서 뜻이 없음(422, 위치 앞에 body)
@@ -152,6 +153,7 @@ class Experiment:
         self._offline_after_s = float(config["devices"]["offline_after_s"])  # 수신 끊김(초)
         self._invalid_after_s = float(config["correction"]["invalid_after_s"])  # 품질 invalid(초)
         self._seen: dict[str, float] = {}  # 장치 → 마지막 수신 시각(단조 초)
+        self._float: tuple[str | None, object] = (None, None)  # 마지막 메시지의 (장치, 플로트 값)
         self._absent: frozenset[str] = frozenset()  # 마지막 메시지에서 absent 였던 구역
         self.review()  # 계약대로 응답할 수 있는 구성인지 봄(아니면 기동에서 실패)
         self._config_hash = checksum(config)  # 설정 해시(회차마다 meta 줄에 구성을 그대로 적음)
@@ -736,20 +738,24 @@ class Experiment:
             known = ", ".join(self._allowed)  # 허용 장치 목록(글자)
             raise Fault(("deviceId",), f"모르는 장치: {device} (있는 것: {known})")  # 422
         self._seen[device] = self.clock.monotonic()
+        self._float = (device, message.get("floatSwitch"))  # 장치 상태에만 씀(수위·위험 판정 제외)
         self._live.admit(message)
         if self._run_state != "running":
             self.renewal()  # 대기·정지 중에도 장치 상태를 새로 봄
 
     # 장치 상태. live 는 마지막 수신 뒤 offline_after_s 부터 offline, 그 밖은 시뮬레이션 값
+    # floatSwitch 는 마지막 메시지의 값. 그 장치가 offline 이거나 값이 없거나 낯설면 unknown
     def roster(self) -> dict[str, str]:
         if self._data_source != "live":
             return dict(SIM_DEVICES)
         now = self.clock.monotonic()
+        fresh = {d for d, t in self._seen.items() if now - t < self._offline_after_s}  # online
         devices = {}
         for device in ("esp32_1", "esp32_2"):  # 계약의 장치 키. 허용 목록에 없으면 offline
-            fresh = device in self._seen and now - self._seen[device] < self._offline_after_s
-            devices[device] = "online" if fresh else "offline"
-        return {**devices, "floatSwitch": "unknown", "emergencyStop": "unknown"}  # 메시지에 없음
+            devices[device] = "online" if device in fresh else "offline"
+        sender, value = self._float
+        switch = value if sender in fresh and value in FLOAT_STATES else "unknown"
+        return {**devices, "floatSwitch": switch, "emergencyStop": "unknown"}  # 비상 정지는 없음
 
     # 입력 품질. live 는 기대 센서(absent 가 아닌 A·B)의 마지막 유효 관측 나이로 판정
     def grade(

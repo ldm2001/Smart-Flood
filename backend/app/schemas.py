@@ -296,6 +296,8 @@ class Message(Intake):
     tMs: Annotated[int, Field(ge=0)]  # 장치 시각(ms, 0 이상)
     readings: Readings  # 읽은 값
     sensorStatus: Status  # 센서 상태
+    # 플로트 스위치(normal 물 있음, low 물 부족). 선택 필드라 없으면 기록 원문에서도 뺌
+    floatSwitch: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 # 장치 메시지의 영수증(POST /api/ingest 응답)

@@ -1,5 +1,7 @@
+import json
+import pytest
 from app.core.calibration import Sensor, gap
-from tests.helpers import lapse
+from tests.helpers import footage, lapse
 
 LIVE = {"mode": "live"}
 START = "/api/experiment/start"
@@ -14,11 +16,12 @@ def message(
     status: str = "ok",
     device: str = "esp32_1",
     b_mm: float | None = None,
+    switch: str | None = None,  # floatSwitch 값(None 이면 필드를 뺌, 옛 펌웨어)
 ) -> dict:
     sensor = Sensor.config(config["sensors"]["A"])
     distance = gap(a_mm / 1000, sensor) if status == "ok" else None  # fault 면 값 없음
     side = None if b_mm is None else gap(b_mm / 1000, Sensor.config(config["sensors"]["B"]))
-    return {
+    body = {
         "deviceId": device,
         "bootId": "b1",
         "seq": seq,
@@ -26,6 +29,7 @@ def message(
         "readings": {"distA_mm": distance, "distB_mm": side, "weight_g": None},
         "sensorStatus": {"A": status, "B": "absent" if b_mm is None else "ok", "load": "absent"},
     }
+    return body if switch is None else {**body, "floatSwitch": switch}
 
 
 # live 로 바꾸면 dataSource 가 live 인 대기 상태가 되고, 또 보내도 같은지 검사
@@ -142,3 +146,64 @@ def test_sim_source_ignores_ingest(client, config):
     response = client.post("/api/ingest", json=message(config, 1))
     assert (response.status_code, response.json()["dataSource"]) == (200, "sim")
     assert client.get("/api/state").json() == before
+
+
+# live 에서 마지막 메시지의 floatSwitch(low·normal)가 장치 상태에 그대로 나오는지 검사
+@pytest.mark.parametrize("value", ["low", "normal"])
+def test_live_float_switch_follows_the_last_message(client, config, value):
+    client.post("/api/source", json=LIVE)
+    response = client.post("/api/ingest", json=message(config, 1, switch=value))
+    assert response.status_code == 200
+    assert client.get("/api/state").json()["devices"]["floatSwitch"] == value
+
+
+# 마지막 메시지에 floatSwitch 가 없으면 앞 메시지가 low 였어도 unknown 인지 검사
+def test_missing_float_switch_is_unknown(client, config):
+    client.post("/api/source", json=LIVE)
+    client.post("/api/ingest", json=message(config, 1, switch="low"))
+    client.post("/api/ingest", json=message(config, 2))
+    assert client.get("/api/state").json()["devices"]["floatSwitch"] == "unknown"
+
+
+# 보낸 장치가 offline(마지막 수신 뒤 offline_after_s)이 되면 unknown 인지 검사
+def test_offline_float_switch_is_unknown(client, clock, service, config):
+    client.post("/api/source", json=LIVE)
+    client.post("/api/ingest", json=message(config, 1, switch="low"))
+    lapse(clock, service, 4)
+    assert client.get("/api/state").json()["devices"]["floatSwitch"] == "low"
+    lapse(clock, service, 1)
+    devices = client.get("/api/state").json()["devices"]
+    assert (devices["esp32_1"], devices["floatSwitch"]) == ("offline", "unknown")
+
+
+# normal·low 가 아닌 글자는 unknown 인지 검사
+@pytest.mark.parametrize("value", ["stuck", "LOW", ""])
+def test_odd_float_switch_is_unknown(client, config, value):
+    client.post("/api/source", json=LIVE)
+    assert client.post("/api/ingest", json=message(config, 1, switch=value)).status_code == 200
+    assert client.get("/api/state").json()["devices"]["floatSwitch"] == "unknown"
+
+
+# sim 에서는 low 를 받아도 시뮬레이션 값 normal 인지 검사
+def test_sim_float_switch_stays_normal(client, config):
+    client.post("/api/ingest", json=message(config, 1, switch="low"))
+    devices = client.get("/api/state").json()["devices"]
+    assert (devices["floatSwitch"], devices["emergencyStop"]) == ("normal", "normal")
+
+
+# floatSwitch 가 있든 없든 받고, 기록 원문은 받은 모양 그대로이며 재생에서는 normal 인지 검사
+def test_ingest_takes_messages_with_and_without_float_switch(
+    client, clock, service, config, journal
+):
+    client.post("/api/source", json=LIVE)
+    log_id = client.post(START, json={}).json()["experimentId"]
+    sent = [message(config, 1, switch="low"), message(config, 2)]  # 새 펌웨어, 옛 펌웨어
+    for body in sent:
+        response = client.post("/api/ingest", json=body)
+        assert response.status_code == 200
+        assert response.json() == {"deviceId": "esp32_1", "seq": body["seq"], "dataSource": "live"}
+    lapse(clock, service, 1)
+    client.post("/api/experiment/stop", json={})
+    assert [r["raw"] for r in journal.records(log_id) if r["type"] == "obs"] == sent
+    states = [json.loads(body) for body in footage(client, clock, log_id)]
+    assert {s["devices"]["floatSwitch"] for s in states} == {"normal"}
