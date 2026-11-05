@@ -1,4 +1,7 @@
+import ipaddress
 import pytest
+import socket
+from app.adapters.solapi import NAMES
 from pathlib import Path
 from tests.helpers import START
 
@@ -6,39 +9,103 @@ from tests.helpers import START
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.yaml"
 
 
-@pytest.fixture(scope="session")  # 테스트 전체에서 한 번만 만드는 준비물
+# 시험 중 바깥 네트워크 연결이 막혔을 때 나는 오류(OSError 라 기존 연결 오류 처리와 같음)
+class Offline(OSError):
+    pass
+
+
+# 같은 컴퓨터 주소인지(127.x·::1·localhost·빈 주소)
+def nearby(host) -> bool:
+    if host is None:
+        return True
+    name = host.decode() if isinstance(host, bytes) else str(host)
+    if name.lower() in ("", "localhost", "localhost."):
+        return True
+    try:
+        address = ipaddress.ip_address(name.split("%")[0])  # IPv6 범위 표시 제거
+    except ValueError:
+        return False  # 그 밖의 이름은 바깥으로 봄
+    return address.is_loopback or address.is_unspecified
+
+
+@pytest.fixture(autouse=True)
+# 바깥 네트워크 연결을 막는 준비물. 같은 컴퓨터 주소와 AF_UNIX 만 허용
+def offline(monkeypatch):
+    connect, connect_ex = socket.socket.connect, socket.socket.connect_ex
+    getaddrinfo, gethostbyname = socket.getaddrinfo, socket.gethostbyname
+
+    # 연결 대상이 허용 범위인지 검사, 아니면 Offline
+    def inspection(sock, address):
+        if sock.family == getattr(socket, "AF_UNIX", None):
+            return
+        host = address[0] if isinstance(address, tuple) else address
+        if not nearby(host):
+            raise Offline(f"시험 중 바깥 연결 차단: {host}")
+
+    # socket.connect 대역
+    def connection(sock, address):
+        inspection(sock, address)
+        return connect(sock, address)
+
+    # socket.connect_ex 대역
+    def attempt(sock, address):
+        inspection(sock, address)
+        return connect_ex(sock, address)
+
+    # socket.getaddrinfo 대역
+    def lookup(host, *args, **kwargs):
+        if not nearby(host):
+            raise Offline(f"시험 중 이름 풀이 차단: {host}")
+        return getaddrinfo(host, *args, **kwargs)
+
+    # socket.gethostbyname 대역
+    def resolution(host):
+        if not nearby(host):
+            raise Offline(f"시험 중 이름 풀이 차단: {host}")
+        return gethostbyname(host)
+
+    monkeypatch.setattr(socket.socket, "connect", connection)
+    monkeypatch.setattr(socket.socket, "connect_ex", attempt)
+    monkeypatch.setattr(socket, "getaddrinfo", lookup)
+    monkeypatch.setattr(socket, "gethostbyname", resolution)
+
+
+@pytest.fixture(autouse=True)
+# 셸에 불러온 발송 환경 변수를 시험마다 지우는 준비물. 실제 키·번호가 시험에 섞이지 않게
+def keyless(monkeypatch):
+    for name in NAMES:
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(scope="session")
 # 설정 딕셔너리를 내주는 준비물
 def config():
     from app.config import settings
 
-    return settings(CONFIG_PATH)  # 설정 파일을 읽어 반환
+    return settings(CONFIG_PATH)
 
 
-@pytest.fixture(scope="session")  # 테스트 전체에서 한 번만 만드는 준비물
+@pytest.fixture(scope="session")
 # 모델 계수를 내주는 준비물
 def params(config):
     from app.core.model import Params
 
-    return Params.config(config)  # 설정으로 계수를 만들어 반환
+    return Params.config(config)
 
 
-@pytest.fixture(scope="session")  # 테스트 전체에서 한 번만 만드는 준비물
-# 사례별 (계수, 1초 상태 목록) 준비물. 검사 1·2 가 같이 기록
+@pytest.fixture(scope="session")
+# 사례별 (계수, 1초 상태 목록) 준비물. 검사 1·2 가 같이 씀
 def runs(config, params):
     from tests.scenarios import EXPERIMENT, EXPERIMENT_S, flood, stress, trace
 
-    stressed = stress(config)  # 빗물받이를 좁혀 수위가 넘치게 만든 가혹한 계수
+    stressed = stress(config)
     return {  # 사례 이름 → (계수, 상태 목록) 을 반환
-        # 기본 계수로 시나리오를 돌린다
         "default": (params, trace(params, EXPERIMENT, EXPERIMENT_S)),
-        # 가혹한 계수로 시나리오를 돌린다
         "stressed": (stressed, trace(stressed, EXPERIMENT, EXPERIMENT_S)),
-        # 처음부터 물이 찬 상태에서 시나리오를 돌린다
         "flooded": (params, trace(params, EXPERIMENT, EXPERIMENT_S, flood(params))),
     }
 
 
-# 테스트 전체에서 한 번 만들고, 모든 테스트에 자동으로 붙는다
 @pytest.fixture(scope="session", autouse=True)
 # 테스트가 logs 폴더를 건드리지 않는지 지키는 준비물
 def sentinel():
@@ -46,67 +113,64 @@ def sentinel():
 
     # 폴더 안 파일 목록(이름, 크기)을 만드는 안쪽 함수
     def entries():
-        if not LOG_DIR.is_dir():  # 폴더가 없으면
-            return []  # 빈 목록을 반환
-        # 파일 이름과 크기를 이름순으로 반환
+        if not LOG_DIR.is_dir():
+            return []
         return sorted((p.name, p.stat().st_size) for p in LOG_DIR.iterdir())
 
-    before = entries()  # 테스트 전 목록을 적어 둔다
-    yield  # 여기서 테스트들이 돈다
-    # 끝난 뒤 목록이 같아야 한다. 다르면 실패
+    before = entries()
+    yield
     assert entries() == before, f"테스트가 {LOG_DIR} 를 바꿨다"
 
 
-@pytest.fixture  # 테스트마다 새로 만드는 준비물
+@pytest.fixture
 # 임시 폴더를 받아 기록기를 내주는 준비물
 def journal(tmp_path):
     from app.adapters.jsonl_log import Jsonl
 
-    return Jsonl(tmp_path / "logs")  # 임시 폴더 안 logs 에 쓰는 기록기
+    return Jsonl(tmp_path / "logs")
 
 
-@pytest.fixture  # 테스트마다 새로 만드는 준비물
+@pytest.fixture
 # 가상 시계를 내주는 준비물
 def clock():
     from app.adapters.clock import Fake
 
-    return Fake(START)  # START 에서 출발하는 시계
+    return Fake(START)
 
 
-@pytest.fixture  # 테스트마다 새로 만드는 준비물
-# 앱을 가상 시계·임시 기록으로 띄우는 준비물. 틱·정적 서빙은 끈다
+@pytest.fixture
+# 앱을 가상 시계·임시 기록으로 띄우는 준비물. 틱·정적 서빙은 끔
 def builder(config, clock, journal):
     from app.main import factory
     from fastapi.testclient import TestClient
 
-    clients = []  # 띄운 클라이언트를 모아 둘 목록
+    clients = []
 
     # 설정과 추가 인자를 받아 클라이언트를 만드는 함수
     def product(cfg=None, **kwargs):
-        kwargs = {  # 기본 인자 묶음을 만듦
-            "clock": clock,  # 가상 시계를 기록
-            "experiment_log": journal,  # 임시 기록기를 기록
+        kwargs = {
+            "clock": clock,
+            "experiment_log": journal,
             "start_ticker": False,  # 1초 틱 태스크는 띄우지 않음
-            "static_dir": None,  # 정적 파일은 서빙하지 않음
-            **kwargs,  # 호출자가 준 인자로 기본값을 덮는다
+            "static_dir": None,
+            **kwargs,
         }
-        # 앱을 만들어 클라이언트로 감싼다
         client = TestClient(factory(config if cfg is None else cfg, **kwargs))
-        clients.append(client.__enter__())  # 클라이언트를 열어 목록에 담는다
-        return client  # 클라이언트를 반환
+        clients.append(client.__enter__())
+        return client
 
-    yield product  # 만드는 함수를 테스트에 내반환
-    for client in clients:  # 테스트가 끝나면 열었던 클라이언트를 하나씩 보고
-        client.__exit__(None, None, None)  # 모두 닫는다
+    yield product
+    for client in clients:
+        client.__exit__(None, None, None)
 
 
-@pytest.fixture  # 테스트마다 새로 만드는 준비물
+@pytest.fixture
 # 기본 설정으로 띄운 클라이언트를 내주는 준비물
 def client(builder):
-    return builder()  # 앱 클라이언트를 만들어 반환
+    return builder()
 
 
-@pytest.fixture  # 테스트마다 새로 만드는 준비물
+@pytest.fixture
 # 앱 안의 실험 서비스를 내주는 준비물
 def service(client):
-    return client.app.state.service  # 앱 상태에 든 서비스를 반환
+    return client.app.state.service

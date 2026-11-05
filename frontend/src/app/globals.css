@@ -1,47 +1,72 @@
 @import "tailwindcss";
 @import "../styles/tokens.css";
 
-/* 본문은 16px 이상으로 둔다(지시서 6장). 기존 화면보다 글자를 키웠다. */
+/* 줄 높이. 한 줄 글은 normal(피그마 auto)을 기본으로 둠. 테일윈드 글자 크기 유틸이
+   함께 넣는 줄 높이도 normal 로 맞춤. 두 줄 이상 될 수 있는 글은 leading-normal(150%)을 붙임 */
+@theme {
+  --text-xs--line-height: normal;
+  --text-sm--line-height: normal;
+  --text-base--line-height: normal;
+  --text-lg--line-height: normal;
+  --text-xl--line-height: normal;
+  --text-2xl--line-height: normal;
+  --text-3xl--line-height: normal;
+  --text-4xl--line-height: normal;
+  --text-key--line-height: normal;
+  --text-figure--line-height: normal;
+}
+
+/* 본문은 16px 이상(지시서 6장). 글자 크기는 12px 이상 짝수만 씀 */
 @layer base {
   html {
     background: var(--bg);
     color: var(--ink);
     font-family: var(--font-body);
-    /* 한글은 어절 단위로 줄을 바꾼다. 한 줄보다 긴 낱말만 중간에서 끊는다. */
+    /* 한글은 어절 단위로 줄을 바꿈. 한 줄보다 긴 낱말만 중간에서 끊음 */
     word-break: keep-all;
     overflow-wrap: break-word;
+    overflow-x: clip;  /* 가로 넘침은 잘라 둠. hidden 과 달리 스크롤 칸을 만들지 않음 */
   }
 
   body {
     min-height: 100vh;
     font-size: 1rem;
-    line-height: 1.6;
-    background: radial-gradient(circle at 80% 0, var(--bg-glow) 0, transparent 28%), var(--bg);
+    line-height: normal;  /* 한 줄 글 기본. 여러 줄 글은 leading-normal 로 150% */
+    background: var(--bg);
+    overflow-x: clip;  /* html 과 같이 가로 넘침을 자름. 옆 메뉴의 sticky 는 그대로 둠 */
+  }
+
+  /* 자간은 글자 크기의 -3%. 요소마다 제 글자 크기로 셈(물려받으면 부모 크기 값이 됨).
+     button·input 등은 preflight 의 letter-spacing: inherit 보다 앞서도록 이름을 적음 */
+  *,
+  ::before,
+  ::after,
+  button,
+  input,
+  select,
+  textarea {
+    letter-spacing: -0.03em;
   }
 }
 
-/* 여러 화면이 같이 쓰는 틀. 색은 tokens.css 의 변수만 쓴다. */
+/* 여러 화면이 같이 쓰는 틀. 색은 tokens.css 의 변수만 씀 */
 @layer components {
   .panel {
     border: 1px solid var(--line);
-    border-radius: 0.8rem;
-    background: linear-gradient(145deg, var(--panel-top), var(--panel));
+    border-radius: 0.75rem;
+    background: var(--panel);
+    color: var(--ink);  /* 글자색도 칸이 정함. html 에서 물려받던 값과 같음 */
   }
 
-  .pill {
+  /* 작은 상태 칩. 한 단 밝은 바탕에 보조 글자색 */
+  .chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    border-radius: 999px;
-    padding: 0.3rem 0.85rem;
-    font-weight: 800;
-    background: var(--chip);
-    color: var(--chip-ink);
-  }
-
-  .eyebrow {
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    color: #8fb8dc;
+    gap: 0.5rem;
+    border-radius: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    font-weight: 500;
+    background: var(--raised);
+    color: var(--soft);
   }
 }
