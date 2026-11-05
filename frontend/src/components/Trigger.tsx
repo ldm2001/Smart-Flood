@@ -13,12 +13,13 @@ export const LOOK = [  // 제어 단추 모양. Menu 링크의 토큰에 꺼짐�
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
   "aria-disabled:cursor-not-allowed aria-disabled:text-muted",
   "aria-[current=true]:border-line aria-[current=true]:bg-raised aria-[current=true]:text-ink",
+  "motion-safe:not-aria-disabled:active:translate-y-px",  // 누르는 동안 1px 내려감. 꺼짐이면 그대로
 ].join(" ");
 
-export const FIELD = [  // 숫자 입력 칸 모양. 단추와 같은 높이·선·외곽선
-  "h-10 rounded-lg border border-line bg-bg px-3 text-ink",
+export const FIELD = [  // 숫자 입력 칸 모양. 단추와 같은 높이·외곽선. 테두리는 대비 3:1 이상인 muted 색
+  "h-10 min-w-0 rounded-lg border border-muted bg-bg px-3 text-ink",  // 좁은 칸에서는 줄어듦
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
-  "disabled:cursor-not-allowed disabled:text-muted",
+  "disabled:cursor-not-allowed disabled:border-line disabled:text-muted",
 ].join(" ");
 
 // 제어 단추가 받는 값

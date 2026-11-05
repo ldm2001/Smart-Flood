@@ -19,7 +19,7 @@ export function Menu() {
           key={item.href}
           href={item.href}
           aria-current={here === item.href ? "page" : undefined}
-          className="flex h-10 items-center rounded-lg border border-transparent px-3 whitespace-nowrap text-soft transition-colors hover:bg-panel hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand aria-[current=page]:border-line aria-[current=page]:bg-raised aria-[current=page]:text-ink"
+          className="flex h-10 items-center rounded-lg border border-transparent px-3 whitespace-nowrap text-soft transition-colors hover:bg-panel hover:text-ink motion-safe:active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand aria-[current=page]:border-line aria-[current=page]:bg-raised aria-[current=page]:text-ink"
         >
           {item.label}
         </Link>

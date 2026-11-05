@@ -40,7 +40,7 @@ import { Reasons, Trigger } from "./Trigger";
 
 const ROW = [  // 기록 목록 줄 모양. 제어 단추의 토큰에 고른 줄 변형만 씀
   "flex flex-wrap items-center gap-x-3 rounded-lg border border-transparent px-3 py-2 text-soft",
-  "transition-colors hover:bg-raised hover:text-ink",
+  "transition-colors hover:bg-raised hover:text-ink motion-safe:active:translate-y-px",
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand",
   "aria-[current=true]:border-line aria-[current=true]:bg-raised aria-[current=true]:text-ink",
 ].join(" ");
