@@ -1,97 +1,155 @@
-# SMART FLOOD
+# SMART FLOOD sensor
 
-A·B·C 세 구역으로 나눈 도시 침수 모형 실험을 위한 백엔드와 관제 웹이다. 백엔드는 물수지 모델로 구역 수위를 계산하고 10·20·30초 뒤를 예측한다. 그 결과를 `/api/state` 로 내보낸다. 지금은 가상 센서(시뮬레이션)로 돌아간다. 나중에 ESP32 실센서가 같은 입력 경로로 붙는다.
+`sensor` 는 센서와 보드 공간이다
 
-> **시험용이다.** 이 프로그램은 모형 실험과 시연을 위한 것이다. 실제 재난 판단이나 실제 문자 발송에 쓰지 않는다. 서버는 펌프 제어 출력과 SMS 발송을 하지 않는다(`outputsLocked` 는 항상 `true`). 위험 알림을 넣더라도 "SMS 예정" 기록만 남긴다.
->
-> **시뮬레이션 결과는 예측 성능의 근거로 쓰지 않는다.** 가상 센서는 운영 모델과 같은 식으로 참값을 만든다. 일부 계수만 15% 바꾸고 센서 잡음을 더할 뿐이다. 그래서 시뮬레이션에서 예측이 잘 맞아도, 실제 모형이나 실제 도시에서도 맞는다는 뜻은 아니다.
->
-> **계수는 가정값이다.** `backend/config.yaml` 에 `ASSUMED` 가 붙은 값은 모형을 만들고 실측하기 전의 가정값이다.
+ESP32 스케치를 만들고 부품을 하나씩 보드에 붙여 시험한다
 
-## 구조
+`firmware/` 만 담고 서버와 웹은 `sim` 이 맡는다
 
-| 폴더 | 내용 |
+보드가 서버로 보내는 메시지는 서버의 `/api/ingest` 계약을 따른다
+
+여기서 만든 것은 `dev` 로 합친다
+
+## 만든 것
+
+### 본 스케치 `firmware/board/`
+
+| 파일 | 내용 |
 |---|---|
-| `backend/` | FastAPI 서버. `app/core/` 순수 모델·예측·보정, `app/ports/` 입출력 포트, `app/adapters/` 구현(가상 센서·시계·JSONL 기록·재생), `app/api/` 라우터 |
-| `frontend/` | 새 관제 웹. Next.js 정적 export(`out/`). 준비·명령·검증은 `frontend/README.md` |
-| `docs/api-contract.md` | `/api/state` 와 제어 API 계약 |
-| `firmware/` | 비어 있다 |
+| `board.ino` | 수위 측정 · 펌프 제어 · 침수 예측 · 서버 전송 |
+| `page.h` | 휴대폰으로 여는 관제 화면 |
+| `secrets.h.example` | 접속 정보 견본 |
 
-## 실행
+수위와 예측
 
-Python 3.11 이 필요하다.
+- 100 ms 마다 수위를 읽는다
+- 1초마다 최근 20초 상승 속도로 A·B·C 구역의 침수 시각을 예측해 주의 · 경계 · 침수 알림을 낸다
+- 구역 기준 높이는 모형 바닥에서 A 40 mm · B 70 mm · C 110 mm 다
+- 자로 잰 두 점으로 수위를 보정한다 (`cal1` · `cal2`)
 
-```bash
-cd backend
-python3 -m pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
+관제 화면
 
-`http://localhost:8000/api/state` 에서 상태를 볼 수 있다. 실험은 제어 API로 시작하고 바꾼다.
+- 보드가 연 와이파이에 휴대폰을 붙이고 시리얼에 찍힌 주소를 연다
+- 센서 전압 · 수위 · 급수통 상태 · 구역 단계를 보여 준다
+- 펌프 수동 ON · 정지 · 강우 회차 시작 · 30초 유량 측정 · 설정 저장을 한다
+- 구역 · 단계 · 한계 수위 이름은 관제 웹과 같다
+- 선행 시간 칸에 현재 수위 경보와 견준 설명을 단다
 
-```bash
-curl -X POST localhost:8000/api/experiment/start -H 'Content-Type: application/json' \
-     -d '{"rain": "heavy", "blockage": {"type": "partial", "location": "INLET-02"}}'
-curl -X POST localhost:8000/api/rain -H 'Content-Type: application/json' -d '{"mmPerHour": 75}'
-curl -X POST localhost:8000/api/experiment/stop -H 'Content-Type: application/json' -d '{}'
-```
+펌프 제어와 공회전 막기
 
-회차는 `backend/logs/` 에 JSONL 로 기록된다(저장소에는 올라가지 않는다). 기록은 다시 재생할 수 있다.
+- 강우 흉내로 펌프를 2초 켜고 8초 끄기를 되풀이한다
+- 릴레이 끄기는 핀을 고임피던스(입력)로 두는 방식 하나로 맞췄다
+- 펌프가 멈추는 조건
+  - 플로트가 급수통 물 모자람을 알리면 100 ms 안
+  - 강우 모드에서 수위센서 이상
+  - 안전 최대 수위 100 mm 도달
+  - 연속 가동 60초 초과
+  - 회차 1800초 초과
 
-```bash
-curl localhost:8000/api/logs
-curl -X POST localhost:8000/api/source -H 'Content-Type: application/json' \
-     -d '{"mode": "replay", "logId": "EXP-20261027-001"}'
-curl -X POST localhost:8000/api/source -H 'Content-Type: application/json' -d '{"mode": "sim"}'
-```
+서버 전송
 
-재생은 기록된 관측과 조작을 다시 넣고 지금의 `config.yaml` 로 다시 계산한다. 기록 모양과 재생 규칙은 `docs/api-contract.md` 에 있다.
+- `STA_SSID` · `STA_PASS` · `SERVER_URL` 을 채우면 1초마다 `POST /api/ingest` 로 보낸다
+- 보내는 값은 `distA_mm = 600 - 수위` 이고 600 은 `INSTALL_HEIGHT_MM` 이다
+- 이 값은 `backend/config.yaml` 의 `sensors.A.install_height_mm` 와 같아야 한다
+- 센서 이상이면 `distA_mm` 를 `null` 로 하고 `A` 를 `fault` 로 보낸다
+- 급수통 플로트 상태도 `floatSwitch` 로 함께 보낸다 (물이 모자라면 `low` 이고 아니면 `normal`)
+- 회차가 열려 있는지도 `running` 으로 함께 보낸다 (안전 정지 중에도 `true` 이고 정지 명령 뒤에는 `false`)
+- 서버는 이 값을 따라 보드 회차가 시작되면 live 로 바꿔 회차를 열고 보드가 정지하면 그 회차를 닫는다 (`backend/config.yaml` 의 `live.follow`)
+- 와이파이가 끊기면 10초마다 다시 붙고 그동안 측정 · 펌프 제어 · 알림 판단은 계속 돈다
+- 연결과 읽기 제한이 각 400 ms 라 서버가 꺼져 있어도 펌프 제어 루프가 오래 막히지 않는다
+- 휴대폰 푸시(ntfy)는 대기열과 별도 태스크로 보낸다
+- 와이파이와 전송 상태는 바뀔 때만 시리얼에 한 줄 찍는다
 
-새 관제 웹은 Node 24 가 필요하다. 다른 터미널에서 띄운다. PATH 와 환경 변수는 `frontend/README.md` 를 본다.
+### 부품 시험 `firmware/parts/`
 
-```bash
-cd frontend
-npm install
-npm run dev    # http://localhost:3000
-```
-
-지금(S0)의 새 화면은 백엔드에 붙지 않고 가상 데이터를 보여 준다. 화면 위쪽에 "가상 데이터(서버 미연결)" 가 표시된다. FastAPI 한 대가 빌드된 `frontend/out/` 을 함께 내보내는 전시 구성은 S5 에서 확인한다.
-
-## 검증
-
-```bash
-cd backend
-pytest && ruff check .
-```
-
-백엔드 지시서 9장의 검증 항목은 번호대로 `backend/tests/test_checkNN_*.py` 에 있다. 12번 항목은 이 명령 자체다. "완료"는 이 테스트 결과로만 판정한다.
-
-새 관제 웹은 다음 명령으로 검증한다. 프론트 지시서 9장의 항목별 위치는 `frontend/README.md` 의 "검증" 절에 있다.
-
-```bash
-cd frontend
-npm run lint && npm run typecheck && npm test && npm run build
-```
-
-## 진행 상황
-
-백엔드(검증 번호는 백엔드 지시서 9장):
-
-| 단계 | 내용 | 상태 |
+| 시험 | 폴더 | 확인하는 것 |
 |---|---|---|
-| M1 | 물수지 모델, 예측, 관측 보정 (검증 1·2·4·10·11) | 완료 |
-| M2 | 가상 센서, 1 Hz tick, `/api/state`, 제어 API (검증 5) | 완료 |
-| M3 | JSONL 실험 기록, 재생 (검증 3·7) | 완료 |
-| M4 | `/api/ingest`, 장치 상태·입력 품질 (검증 6·9) | 예정 |
-| M5 | 위험 단계, 시험용 알림 기록 (검증 8) | 예정 |
+| 1 | `parts/led` | ESP32 단독 업로드와 500 ms tick |
+| 2 | `parts/net` | 와이파이 접속과 서버 `/api/state` 읽기 |
+| 3 | `parts/reed` | 플로트 스위치 닫힘과 열림 |
+| 4·5 | `parts/relay` | 릴레이 단독과 릴레이에 단 펌프 |
+| 6 | `parts/depth` | 수위센서 전압(mV)과 흔들림 |
+| 7 | `board` | 서버 없이 관제 화면 · 보정 · 강우 회차 · 플로트 정지 |
+| 8 | `board` | 서버와 함께 `/api/ingest` 전송 |
 
-새 관제 웹(검증 번호는 프론트 지시서 9장):
+### MicroPython 판 `firmware/python/`
 
-| 단계 | 내용 | 상태 |
-|---|---|---|
-| S0 | 뼈대: 설정, zod 스키마, 파생 계산, 시계·설정 훅, mock 화면 (검증 1~9) | 완료 |
-| S1 | 상태 배너, 구역 게이지, 수위 차트, 배지, 백엔드 연결 (검증 10) | 예정 |
-| S2 | 도시 평면도, 알림 타임라인, 장치 상태, 이벤트 기록 | 예정 |
-| S3 | `/ops` 제어·설정·확인 화면 | 예정 |
-| S4 | `/logs` 실험 기록·재생 비교 | 예정 |
-| S5 | 대비·글자 크기 점검, FastAPI 로 `out/` 서빙 | 예정 |
+같은 보드에서 도는 MicroPython 판으로 수위 측정과 `/api/ingest` 전송을 맡는다
+
+| 파일 | 내용 |
+|---|---|
+| `level.py` | 전압을 수위로 바꾸는 직선 · 센서 이상 범위 · 이동평균 · 보정 직선 |
+| `ingest.py` | 서버 `/api/ingest` 메시지 |
+| `client.py` | `socket` 만 쓰는 HTTP POST |
+| `node.py` | 100 ms 표본과 1초 전송 루프 |
+| `main.py` | 보드 층 (ADC · 와이파이 · 감시 타이머) |
+| `host.py` | 보드 없이 같은 루프를 컴퓨터에서 돌리는 실행기 |
+
+- 순수 모듈은 컴퓨터에서 pytest 로 돈다
+- 릴레이 핀은 입력으로 두고 펌프 제어는 본 스케치가 맡는다
+
+### 핀맵 REV16
+
+| 부품 | ESP32 핀 |
+|---|---|
+| 수위센서 KIT0139 변환보드 출력 | GPIO34 |
+| 릴레이 모듈 IN | GPIO26 |
+| 플로트 스위치 HWD-WLC002 | GPIO27 |
+| 보드 LED | GPIO2 |
+
+## 컴파일과 업로드
+
+처음 한 번 Arduino IDE `2.x` 에 ESP32 보드를 들인다
+
+- 환경설정의 추가 보드 관리자 URL 에 `https://espressif.github.io/arduino-esp32/package_esp32_index.json` 을 넣는다
+- 보드 매니저에서 "esp32 by Espressif Systems" 를 설치한다
+
+접속 정보 파일을 견본에서 복사한다
+
+```bash
+cp firmware/board/secrets.h.example firmware/board/secrets.h
+```
+
+그 뒤 스케치를 올린다
+
+- `firmware/board/board.ino` 를 폴더째로 연다
+- 도구 메뉴에서 보드 "ESP32 Dev Module" 과 포트를 고른다
+- 업로드 속도는 921600 이고 안 되면 115200 으로 둔다
+- 업로드 단추를 누르고 시리얼 모니터를 115200 으로 연다
+- `board.ino` · `page.h` · `secrets.h` 는 같은 폴더에 둔다
+- 부품 시험은 `firmware/parts/<이름>/<이름>.ino` 를 같은 방법으로 올린다
+- 업로드가 `Connecting.....` 에서 멈추면 BOOT 단추를 누른 채로 기다린다
+- 접속 정보는 `secrets.h` 와 `secret.py` 에만 두고 저장소에는 견본만 올린다
+
+MicroPython 판은 펌웨어를 쓴 뒤 코드를 올린다
+
+```bash
+python -m esptool --chip esp32 --port <포트> erase_flash
+python -m esptool --chip esp32 --port <포트> --baud 460800 write_flash -z 0x1000 <.bin 경로>
+```
+
+```bash
+cd firmware/python
+cp secret.py.example secret.py
+```
+
+```bash
+mpremote connect <포트> cp level.py ingest.py client.py node.py main.py secret.py :
+mpremote connect <포트> reset
+mpremote connect <포트> repl
+```
+
+MicroPython 판의 공용 모듈은 컴퓨터에서 시험한다
+
+```bash
+cd firmware/python
+python -m pytest -q
+ruff check .
+```
+
+## 따라하기 안내
+
+- 조립한 보드의 첫 실행은 `firmware/README.md` 의 "조립서대로 연결한 뒤" 절에 있다
+- Windows 와 macOS 의 단계별 명령은 `firmware/README.md` 의 "보드 시험 따라하기 (Windows·macOS)" 절에 있다
+- 배선과 통과 기준은 같은 파일의 "핀맵(REV16)" 절과 "순서" 절에 있다
+- 서버와 함께 하는 시험 8 은 서버가 함께 있는 `dev` 에서 한다
