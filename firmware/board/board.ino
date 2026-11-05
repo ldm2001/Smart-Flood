@@ -83,7 +83,7 @@ struct Config {
 
 Preferences prefs;
 WebServer server(80);
-bool webOn = false;  // 관제 화면을 열었는지(AP 암호가 있을 때만)
+bool webOn = false;  // 관제 화면 열림 여부(AP 암호가 있을 때만)
 
 // ===== 상태 =====
 enum Mode { M_STOP = 0, M_MANUAL, M_RAIN, M_FLOWTEST };
@@ -108,12 +108,10 @@ int stage[NZ];                 // 0 정상, 1 주의, 2 경계, 3 침수
 float alertT[NZ], floodT[NZ];  // 첫 경보와 실제 침수 시각(회차 경과 초, -1 은 없음)
 float areaEst = 0;
 
-// 1초 이력
 const int HN = 30, REG = 20;
-float hist[HN];
+float hist[HN];  // 1초 이력
 int hN = 0, hI = 0;
-// 실험 기록(1초 간격, 최대 30분)
-const int LOGN = 1800;
+const int LOGN = 1800;  // 실험 기록(1초 간격, 최대 30분)
 int16_t logLv[LOGN];
 uint8_t logPump[LOGN];
 int logN = 0;
@@ -125,7 +123,7 @@ int sendCode = 1;  // 마지막으로 찍은 전송 결과. HTTP 코드, 음수�
 
 // ===== 릴레이 =====
 // 릴레이를 켜거나 끔. 끌 때 RELAY_OFF_HIGHZ 면 핀을 입력으로 풀어 모듈의 풀업이 끄게 함
-void relayWrite(bool on) {
+void relay(bool on) {
   if (RELAY_ACTIVE_LOW) {
     if (on) {
       pinMode(PIN_RELAY, OUTPUT);
@@ -143,32 +141,32 @@ void relayWrite(bool on) {
 }
 
 // 펌프 상태를 바꾸고 가동 시간을 쌓음
-void setPump(bool on) {
+void pump(bool on) {
   if (on == pumpOn) return;
   if (on) pumpOnSince = millis();
   else pumpOnTotalS += (millis() - pumpOnSince) / 1000.0f;
   pumpOn = on;
-  relayWrite(on);
+  relay(on);
 }
 
 // 펌프를 끄고 멈춘 까닭을 남김
-void stopPump(const String& why) {
+void cutoff(const String& why) {
   mode = M_STOP;
-  setPump(false);
+  pump(false);
   stopWhy = why;
   Serial.println("[STOP] " + why);
 }
 
 // ===== 저장 =====
 // 설정을 플래시에 저장
-void saveCfg() {
+void commit() {
   prefs.begin("flood2", false);
   prefs.putBytes("cfg", &cfg, sizeof(cfg));
   prefs.end();
 }
 
 // 플래시의 설정을 읽음. 크기가 다르면(펌웨어가 바뀜) 기본값을 씀
-void loadCfg() {
+void recall() {
   prefs.begin("flood2", true);
   if (prefs.getBytesLength("cfg") == sizeof(cfg)) prefs.getBytes("cfg", &cfg, sizeof(cfg));
   prefs.end();
@@ -176,7 +174,7 @@ void loadCfg() {
 
 // ===== 측정 =====
 // 수위센서 전압(mV). 64번 읽은 평균
-float readMv() {
+float voltage() {
   uint32_t s = 0;
   for (int i = 0; i < 64; i++) s += analogReadMilliVolts(PIN_LEVEL);
   return s / 64.0f;
@@ -184,7 +182,7 @@ float readMv() {
 
 // 100 ms 마다: 전압을 이동평균하고 수위(mm)와 플로트 상태를 갱신
 void sample() {
-  float mv = readMv();
+  float mv = voltage();
   levelMv = (levelMv == 0) ? mv : levelMv * 0.85f + mv * 0.15f;
   fault = (levelMv < FAULT_LOW_MV || levelMv > FAULT_HIGH_MV);
   levelMm = cfg.lvSlope * levelMv + cfg.lvOffset;
@@ -220,7 +218,7 @@ float regression() {
 }
 
 // 단계가 오른 구역의 알림 문구를 쌓음
-void queuePush(int zi, int st) {
+void alert(int zi, int st) {
   static const char* SN[] = {"정상", "주의", "경계", "침수"};
   String msg = String("[") + SN[st] + "] " + ZNAME[zi];
   if (st < 3) msg += " " + String((int)eta[zi]) + "초 뒤 침수 예상.";
@@ -233,7 +231,7 @@ void queuePush(int zi, int st) {
 }
 
 // 1초마다: 이력을 쌓고 상승 속도, 예측 수위, 구역별 침수까지 남은 초와 단계를 갱신
-void predict() {
+void forecast() {
   hist[hI] = levelMm;
   hI = (hI + 1) % HN;
   if (hN < HN) hN++;
@@ -263,11 +261,11 @@ void predict() {
     if (eta[i] == 0) st = 3;
     else if (eta[i] > 0 && eta[i] <= cfg.warningEta) st = 2;
     else if (eta[i] > 0 && eta[i] <= cfg.cautionEta) st = 1;
-    if (running && st > stage[i]) {  // 회차 중에는 단계가 올라가기만 함
+    if (running && st > stage[i]) {  // 회차 중에는 단계를 내리지 않음
       if (stage[i] == 0 && alertT[i] < 0) alertT[i] = t;
       if (st == 3 && floodT[i] < 0) floodT[i] = t;
       stage[i] = st;
-      queuePush(i, st);
+      alert(i, st);
     }
     if (!running) stage[i] = st;
   }
@@ -287,40 +285,40 @@ void predict() {
 // 100 ms 마다: 안전 조건이 하나라도 걸리면 펌프를 끄고, 아니면 모드대로 돌림
 void control() {
   if (mode == M_STOP) {
-    setPump(false);
+    pump(false);
     return;
   }
   if (floatLow) {
-    stopPump("급수통 물 부족(플로트)");
+    cutoff("급수통 물 부족(플로트)");
     return;
   }
   if (mode != M_MANUAL && mode != M_FLOWTEST && fault) {
-    stopPump("수위센서 이상(12V·배선 확인)");
+    cutoff("수위센서 이상(12V·배선 확인)");
     return;
   }
   if (!fault && levelMm >= cfg.maxLevel && mode != M_FLOWTEST) {
-    stopPump("안전 최대 수위 도달");
+    cutoff("안전 최대 수위 도달");
     return;
   }
   if (pumpOn && millis() - pumpOnSince > cfg.pumpMaxOnS * 1000UL) {
-    stopPump("연속 가동 시간 초과");
+    cutoff("연속 가동 시간 초과");
     return;
   }
   if (running && elapsedS() > cfg.runMaxS) {
-    stopPump("실험 최대 시간 초과");
+    cutoff("실험 최대 시간 초과");
     return;
   }
 
   if (mode == M_MANUAL) {
-    setPump(true);
+    pump(true);
     return;
   }
   if (mode == M_FLOWTEST) {
     if (millis() - flowTestStart >= 30000UL) {
-      stopPump("유량 측정 30초 완료");
+      cutoff("유량 측정 30초 완료");
       return;
     }
-    setPump(true);
+    pump(true);
     return;
   }
   if (mode == M_RAIN) {
@@ -329,12 +327,12 @@ void control() {
       phaseOn = !phaseOn;
       phaseSince = millis();
     }
-    setPump(phaseOn);
+    pump(phaseOn);
   }
 }
 
 // 새 회차를 시작: 기록과 단계를 비움
-void newRun() {
+void run() {
   running = true;
   runStartMs = millis();
   logN = 0;
@@ -351,7 +349,7 @@ void newRun() {
 // ===== 네트워크 =====
 // 1초마다: 와이파이 연결이 바뀌면 시리얼에 찍음(SSID 는 찍지 않음). 끊긴 뒤 10초는 코어의 자동
 // 재접속에 맡기고, 그 뒤로는 REJOIN_MS 마다 다시 붙어 봄. 부팅 때 공유기가 없던 경우도 같음
-void watchWifi() {
+void wifi() {
   if (!*STA_SSID) return;
   static int was = -1;             // 지난번 연결 여부. -1 은 아직 모름
   static unsigned long tried = 0;  // 끊김을 보거나 다시 붙어 본 시각
@@ -370,7 +368,7 @@ void watchWifi() {
 }
 
 // 전송 결과가 지난번과 다를 때만 시리얼에 찍음
-void logSend(int code) {
+void outcome(int code) {
   if (code == sendCode) return;
   sendCode = code;
   if (code > 0) Serial.printf("서버 전송 HTTP %d\n", code);
@@ -380,7 +378,7 @@ void logSend(int code) {
 
 // 1초마다: 수위를 서버 메시지 모양(distA_mm 는 설치 높이 - 수위)으로 보냄. 이상이면 null 과 fault
 // floatSwitch 는 급수통 물 부족이면 low, 아니면 normal
-void sendIngest() {
+void ingest() {
   if (!*SERVER_URL || WiFi.status() != WL_CONNECTED) return;
   size_t n = strlen(SERVER_URL);
   while (n > 0 && SERVER_URL[n - 1] == '/') n--;  // 끝의 / 를 빼고 붙여 //api 가 되지 않음
@@ -390,7 +388,7 @@ void sendIngest() {
   http.setTimeout(400);
   http.setConnectTimeout(400);  // 서버가 꺼져 있어도 안전 루프(100 ms)를 오래 막지 않음
   if (!http.begin(String(url))) {
-    logSend(0);
+    outcome(0);
     return;
   }
   http.addHeader("Content-Type", "application/json");
@@ -403,7 +401,7 @@ void sendIngest() {
            DEVICE_ID, bootId.c_str(), (unsigned long)seqNo++, (unsigned long)millis(),
            fault ? "null" : String(INSTALL_HEIGHT_MM - levelMm, 1).c_str(),
            fault ? "fault" : "ok", floatLow ? "low" : "normal");
-  logSend(http.POST((uint8_t*)body, strlen(body)));
+  outcome(http.POST((uint8_t*)body, strlen(body)));
   http.end();
 }
 
@@ -411,7 +409,7 @@ QueueHandle_t pushQ = nullptr;  // ntfy 전송 대기열(글 사본 포인터)
 bool pushDrop = false;          // 대기열 가득 참 안내 1회 여부
 
 // ntfy 전송 태스크. 대기열의 글을 HTTPS 로 보냄(loop·control 과 따로 돎)
-void pushTask(void*) {
+void ntfy(void*) {
   for (;;) {
     char* msg = nullptr;
     if (xQueueReceive(pushQ, &msg, portMAX_DELAY) != pdTRUE || !msg) continue;
@@ -431,7 +429,7 @@ void pushTask(void*) {
 }
 
 // 쌓인 알림을 시리얼에 찍고, 주제가 있으면 ntfy 대기열에 넣음(가득 차면 버림)
-void sendPush() {
+void push() {
   if (pendingPush.length() == 0) return;
   String msg = pendingPush;
   pendingPush = "";
@@ -440,7 +438,7 @@ void sendPush() {
   if (!pushQ) {
     pushQ = xQueueCreate(4, sizeof(char*));
     if (!pushQ) return;
-    xTaskCreatePinnedToCore(pushTask, "push", 8192, nullptr, 1, nullptr, 0);
+    xTaskCreatePinnedToCore(ntfy, "push", 8192, nullptr, 1, nullptr, 0);
   }
   char* copy = strdup(msg.c_str());
   if (!copy) return;
@@ -453,7 +451,7 @@ void sendPush() {
 
 // ===== 관제 화면 =====
 // 가장 위험한 구역 기준의 대피 안내 문구
-String routeText() {
+String guidance() {
   if (stage[2] >= 1) return "고지대(C)도 위험: 실험을 멈추세요";
   if (stage[1] >= 1) return "주택 골목(B) 침수 예상: 고지대 대피 공간(C)으로 대피";
   if (stage[0] >= 1) return "낮은 도로(A) 침수 예상: 경로 A를 피해 높은 경로 B로 우회";
@@ -461,7 +459,7 @@ String routeText() {
 }
 
 // GET /api/status: 화면이 1초마다 읽는 현재 상태
-void handleStatus() {
+void status() {
   String s;
   s.reserve(900);
   s += "{\"level\":" + String(levelMm, 1) + ",\"mv\":" + String(levelMv, 0);
@@ -474,7 +472,7 @@ void handleStatus() {
     s += "{\"stage\":" + String(stage[i]) + ",\"eta\":" + String(eta[i], 0) +
          ",\"alertT\":" + String(alertT[i], 0) + ",\"floodT\":" + String(floodT[i], 0) + "}";
   }
-  s += "],\"route\":\"" + routeText() + "\",\"why\":\"" + stopWhy + "\"";
+  s += "],\"route\":\"" + guidance() + "\",\"why\":\"" + stopWhy + "\"";
   s += ",\"pump\":" + String(pumpOn ? "true" : "false") + ",\"mode\":" + String((int)mode);
   s += ",\"elapsed\":" + String(elapsedS(), 0) + ",\"floatLow\":" + String(floatLow ? "true" : "false");
   s += ",\"areaEst\":" + String(areaEst, 0);
@@ -488,7 +486,7 @@ void handleStatus() {
 }
 
 // GET /api/hist: 최근 120초 수위. 회차 밖이면 1초 이력
-void handleHist() {
+void history() {
   String s = "[";
   int n = logN < 120 ? logN : 120;
   if (!running && n == 0) {
@@ -507,7 +505,7 @@ void handleHist() {
 }
 
 // GET /log.csv: 이번 회차 기록
-void handleLog() {
+void csv() {
   String s = "t_s,level_mm,pump\n";
   for (int k = 0; k < logN; k++) {
     s += String(k) + "," + String(logLv[k] / 10.0f, 1) + "," + String(logPump[k]) + "\n";
@@ -517,19 +515,19 @@ void handleLog() {
 }
 
 // GET /api/cmd?c=명령&v=값: 시작·정지·수동·유량 측정·보정
-void handleCmd() {
+void cmd() {
   String c = server.arg("c");
   float v = server.arg("v").toFloat();
   if (c == "stop") {
-    stopPump("사용자 정지");
+    cutoff("사용자 정지");
     running = false;
   } else if (c == "start") {
-    newRun();
+    run();
     mode = M_RAIN;
     phaseOn = true;
     phaseSince = millis();
   } else if (c == "rain") {
-    if (!running) newRun();
+    if (!running) run();
     stopWhy = "";
     mode = M_RAIN;
     phaseOn = true;
@@ -543,57 +541,57 @@ void handleCmd() {
     flowTestStart = millis();
   } else if (c == "flowset" && v > 0) {
     cfg.flowMlS = v / 30.0f;
-    saveCfg();
+    commit();
   } else if (c == "areaapply" && areaEst > 0) {
     cfg.areaCm2 = areaEst;
-    saveCfg();
+    commit();
   } else if (c == "cal1") {
     cfg.cal1mv = levelMv;
     cfg.cal1mm = v;
     cfg.cal1 = true;
     cfg.lvSlope = LEVEL_SLOPE_THEORY;
     cfg.lvOffset = v - cfg.lvSlope * levelMv;
-    saveCfg();
+    commit();
   } else if (c == "cal2" && cfg.cal1 && fabs(levelMv - cfg.cal1mv) > 5) {
     cfg.lvSlope = (v - cfg.cal1mm) / (levelMv - cfg.cal1mv);
     cfg.lvOffset = v - cfg.lvSlope * levelMv;
-    saveCfg();
+    commit();
   } else if (c == "calreset") {
     Config d;
     cfg.lvSlope = d.lvSlope;
     cfg.lvOffset = d.lvOffset;
     cfg.cal1 = false;
-    saveCfg();
+    commit();
   }
   server.send(200, "text/plain", "ok");
 }
 
 // GET /api/set?키=값: 기준 높이와 경보 설정 저장
-void handleSet() {
-  auto get = [](const char* k, float& dst) {
+void settings() {
+  auto param = [](const char* k, float& dst) {
     if (server.hasArg(k)) dst = server.arg(k).toFloat();
   };
-  get("z0", cfg.z[0]);
-  get("z1", cfg.z[1]);
-  get("z2", cfg.z[2]);
-  get("maxLevel", cfg.maxLevel);
-  get("cautionEta", cfg.cautionEta);
-  get("warningEta", cfg.warningEta);
-  get("rainOnS", cfg.rainOnS);
-  get("rainOffS", cfg.rainOffS);
+  param("z0", cfg.z[0]);
+  param("z1", cfg.z[1]);
+  param("z2", cfg.z[2]);
+  param("maxLevel", cfg.maxLevel);
+  param("cautionEta", cfg.cautionEta);
+  param("warningEta", cfg.warningEta);
+  param("rainOnS", cfg.rainOnS);
+  param("rainOffS", cfg.rainOffS);
   if (cfg.rainOnS < 0.5f) cfg.rainOnS = 0.5f;
   if (cfg.rainOffS < 0) cfg.rainOffS = 0;
-  saveCfg();
+  commit();
   server.send(200, "text/plain", "ok");
 }
 
 // ===== setup / loop =====
 void setup() {
-  relayWrite(false);  // 부팅 직후 펌프 OFF
+  relay(false);  // 부팅 직후 펌프 OFF
   Serial.begin(115200);
   pinMode(PIN_FLOAT, INPUT_PULLUP);
   analogSetPinAttenuation(PIN_LEVEL, ADC_11db);
-  loadCfg();
+  recall();
   for (int i = 0; i < NZ; i++) {
     stage[i] = 0;
     alertT[i] = -1;
@@ -619,11 +617,11 @@ void setup() {
   Serial.println(WiFi.softAPIP().toString());
 
   server.on("/", []() { server.send_P(200, "text/html; charset=utf-8", PAGE); });
-  server.on("/api/status", handleStatus);
-  server.on("/api/hist", handleHist);
-  server.on("/api/cmd", handleCmd);
-  server.on("/api/set", handleSet);
-  server.on("/log.csv", handleLog);
+  server.on("/api/status", status);
+  server.on("/api/hist", history);
+  server.on("/api/cmd", cmd);
+  server.on("/api/set", settings);
+  server.on("/log.csv", csv);
   server.begin();
 }
 
@@ -637,11 +635,11 @@ void loop() {
   }
   if (millis() - t1000 >= 1000) {
     t1000 = millis();
-    predict();
+    forecast();
     Serial.printf("t=%.0f lv=%.1fmm rate=%.2fmm/min eta A=%.0f B=%.0f C=%.0f pump=%d\n",
                   elapsedS(), levelMm, rate * 60, eta[0], eta[1], eta[2], pumpOn);
-    watchWifi();
-    sendIngest();
-    sendPush();
+    wifi();
+    ingest();
+    push();
   }
 }
