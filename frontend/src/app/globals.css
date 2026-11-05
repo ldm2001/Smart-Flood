@@ -25,6 +25,7 @@
     /* 한글은 어절 단위로 줄을 바꿈. 한 줄보다 긴 낱말만 중간에서 끊음 */
     word-break: keep-all;
     overflow-wrap: break-word;
+    overflow-x: clip;  /* 가로 넘침은 잘라 둠. hidden 과 달리 스크롤 칸을 만들지 않음 */
   }
 
   body {
@@ -32,6 +33,7 @@
     font-size: 1rem;
     line-height: normal;  /* 한 줄 글 기본. 여러 줄 글은 leading-normal 로 150% */
     background: var(--bg);
+    overflow-x: clip;  /* html 과 같이 가로 넘침을 자름. 옆 메뉴의 sticky 는 그대로 둠 */
   }
 
   /* 자간은 글자 크기의 -3%. 요소마다 제 글자 크기로 셈(물려받으면 부모 크기 값이 됨).
@@ -53,6 +55,7 @@
     border: 1px solid var(--line);
     border-radius: 0.75rem;
     background: var(--panel);
+    color: var(--ink);  /* 글자색도 칸이 정함. html 에서 물려받던 값과 같음 */
   }
 
   /* 작은 상태 칩. 한 단 밝은 바탕에 보조 글자색 */
