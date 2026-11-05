@@ -9,8 +9,8 @@ STAGES = ("safe", "caution", "warning", "evacuate")  # 정상·주의·경계·�
 RANK = {stage: i for i, stage in enumerate(STAGES)}
 
 
-# 경보 규칙: 구역별 한계 수위(m), 주의·경계 도달 상한(초), 침수 해제 비율, 내림 유지 시간(초)
 @dataclass(frozen=True)
+# 경보 규칙: 구역별 한계 수위(m), 주의·경계 도달 상한(초), 침수 해제 비율, 내림 유지 시간(초)
 class Rule:
     thresholds_m: dict[str, float]
     caution_eta_s: float
@@ -20,8 +20,8 @@ class Rule:
     slope_window_s: float = 20.0  # 실측 기울기 창(초)
     measured_sources: frozenset[str] = frozenset()  # 실측 수위로 판정할 입력원
 
-    # config 의 zones.*.threshold_mm 와 alerts 로 규칙을 만듦. 쓸 수 없는 값은 ValueError
     @classmethod
+    # config 의 zones.*.threshold_mm 와 alerts 로 규칙을 만듦. 쓸 수 없는 값은 ValueError
     def config(cls, cfg: dict) -> Rule:
         thresholds = {z: cfg["zones"][z]["threshold_mm"] / 1000.0 for z in ZONES}
         for z, threshold in thresholds.items():
@@ -65,8 +65,8 @@ def slope(samples: Sequence[tuple[float, float]], window_s: float) -> float | No
     return sum((t - mean_t) * (h - mean_h) for t, h in kept) / spread
 
 
-# 구역 하나의 감시 상태: 단계, 도달 예상 초(안 오르면 None), 내림 유지가 시작된 경과 초
 @dataclass(frozen=True)
+# 구역 하나의 감시 상태: 단계, 도달 예상 초(안 오르면 None), 내림 유지가 시작된 경과 초
 class Watch:
     stage: str = "safe"
     eta_s: float | None = None

@@ -55,7 +55,7 @@ class Params:
     dt_s: float  # 계산 간격(초)
     model_version: str  # 모델 버전
 
-    @classmethod  # 클래스 메서드(인스턴스 없이 부름)
+    @classmethod
     # 설정 한 덩어리로 계수 묶음을 만듦
     def config(cls, cfg: dict) -> Params:
         zones_cfg = cfg["zones"]

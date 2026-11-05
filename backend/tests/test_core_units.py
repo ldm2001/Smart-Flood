@@ -205,7 +205,7 @@ def test_prediction_runs_on_a_copy_and_records_metadata(config, params):
 
 
 
-@pytest.fixture  # 4.3 센서 값 변환(결과는 SI). 테스트마다 새로 만드는 준비물
+@pytest.fixture  # 4.3 센서 값 변환(결과는 SI)
 # A 구역 거리 센서 설정을 만드는 준비물
 def probe(config):
     return Sensor.config(config["sensors"]["A"])

@@ -24,7 +24,7 @@ class Jsonl:
         path = self.path(experiment_id)
         if not records:  # 쓸 것이 없으면 파일도 만들지 않음(빈 파일이 회차 번호를 먹지 않게)
             return
-        body = "".join(dump(record) for record in records).encode("utf-8")  # 먼저 글자로 변환
+        body = "".join(jsonline(record) for record in records).encode("utf-8")  # 먼저 글자로 변환
         self.directory.mkdir(parents=True, exist_ok=True)
         mark = None  # 쓰기 전 파일 끝(열지 못했으면 None)
         try:
@@ -53,17 +53,17 @@ class Jsonl:
         path = self.path(experiment_id)
         if not path.is_file():
             raise Absence(experiment_id)
-        return stream(path)  # 줄을 하나씩 읽어 주는 반복자를 반환
+        return stream(path)
 
     # 회차 ID 로 파일 경로를 만듦
     def path(self, experiment_id: str) -> Path:
         if not EXPERIMENT_ID.fullmatch(experiment_id):
             raise ValueError(f"실험 ID 형식이 아니다: {experiment_id!r}")
-        return self.directory / f"{experiment_id}.jsonl"  # 폴더 아래 ID.jsonl 경로를 반환
+        return self.directory / f"{experiment_id}.jsonl"
 
 
 # 기록 한 건을 JSON 한 줄로 변환
-def dump(record: dict) -> str:
+def jsonline(record: dict) -> str:
     return json.dumps(record, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n"
 
 

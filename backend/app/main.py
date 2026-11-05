@@ -73,30 +73,30 @@ def factory(
         allow_headers=["Content-Type"],
     )
 
-    @app.exception_handler(RequestValidationError)  # 요청 검증 오류(422) 처리기
+    @app.exception_handler(RequestValidationError)
     # 검증 오류를 422 응답으로 변환
     async def validation(request: Request, error: RequestValidationError) -> JSONResponse:
         detail = encoding(jsonable_encoder(error.errors()))  # 기본 처리기와 같은 모양
         return JSONResponse(status_code=422, content={"detail": detail})
 
-    @app.exception_handler(Fault)  # 입력 오류(Fault) 처리기
+    @app.exception_handler(Fault)
     # 입력 오류를 422 응답으로 변환
     async def fault(request: Request, error: Fault) -> JSONResponse:
         detail = [{"loc": ["body", *error.loc], "msg": error.message, "type": "value_error"}]
         return JSONResponse(status_code=422, content={"detail": detail})
 
-    @app.exception_handler(Conflict)  # 충돌(Conflict) 처리기
+    @app.exception_handler(Conflict)
     # 충돌 오류를 409 응답으로 변환
     async def conflict(request: Request, error: Conflict) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(error)})
 
-    @app.exception_handler(Bounce)  # 시험 문자 발송 실패(Bounce) 처리기
+    @app.exception_handler(Bounce)
     # 발송 실패를 502 응답으로 변환(글은 예외 종류만)
     async def bounce(request: Request, error: Bounce) -> JSONResponse:
         detail = f"시험 문자를 보내지 못했다: {error}"  # 예: "시험 문자를 보내지 못했다: Refusal"
         return JSONResponse(status_code=502, content={"detail": detail})
 
-    @app.exception_handler(Outage)  # 입출력 장애(Outage) 처리기
+    @app.exception_handler(Outage)
     # 장애를 503 응답으로 변환
     async def outage(request: Request, error: Outage) -> JSONResponse:
         return JSONResponse(status_code=503, content={"detail": str(error)})

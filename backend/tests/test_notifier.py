@@ -17,13 +17,13 @@ STATE_URL = "/api/state"
 LOGGER = "app.adapters.dispatch"
 
 
-# send(to, body) 를 흉내 내며 부른 횟수를 셈. fail 이면 예외를 냄
+# outbox(to, body) 를 흉내 내며 부른 횟수를 셈. fail 이면 예외를 냄
 class Phone:
     def __init__(self, fail: bool = False) -> None:
         self.calls: list[tuple[str, str]] = []
         self.fail = fail
 
-    def send(self, to: str, body: str) -> None:
+    def outbox(self, to: str, body: str) -> None:
         self.calls.append((to, body))
         if self.fail:
             raise TimeoutError("시험용 실패")
@@ -63,7 +63,7 @@ def notes(caplog) -> list[str]:
 # 무장한 sms 디스패치(가짜 전화, 동기 runner)
 def armed(config, phone, **changes) -> Dispatch:
     dispatch = Dispatch(settings(config, **changes), KEYS, phone, runner=direct)
-    dispatch.arm(True)
+    dispatch.arming(True)
     return dispatch
 
 
@@ -76,7 +76,7 @@ def armed(config, phone, **changes) -> Dispatch:
 def test_a_missing_condition_sends_nothing(config, caplog, mode, keys, arm):
     phone = Phone()
     dispatch = Dispatch(settings(config, mode), keys, phone if keys else None, runner=direct)
-    dispatch.arm(arm)  # 조건이 안 맞으면 켜지지 않음
+    dispatch.arming(arm)  # 조건이 안 맞으면 켜지지 않음
     with caplog.at_level(logging.WARNING):
         dispatch.notice(shift("warning", "caution"))
     assert phone.calls == []
@@ -123,7 +123,7 @@ def test_each_zone_stage_sends_once_and_a_rise_sends_again(config):
 def test_a_number_outside_the_allowlist_is_blocked(config, caplog):
     phone = Phone()
     dispatch = Dispatch(settings(config), KEYS, phone, runner=direct, to=(STRANGER,))
-    dispatch.arm(True)
+    dispatch.arming(True)
     with caplog.at_level(logging.WARNING):
         dispatch.notice(shift("warning", "caution"))
     assert phone.calls == []
@@ -159,13 +159,13 @@ def test_the_courier_sends_off_the_calling_thread(config):
     threads: list[threading.Thread] = []
 
     class Slow:
-        def send(self, to, body):
+        def outbox(self, to, body):
             gate.wait(5)
             threads.append(threading.current_thread())
             done.set()
 
     dispatch = Dispatch(settings(config), KEYS, Slow(), runner=Courier())
-    dispatch.arm(True)
+    dispatch.arming(True)
     dispatch.notice(shift("warning", "caution"))  # 보내기가 막혀 있어도 돌아옴
     assert not done.is_set()
     gate.set()
@@ -296,7 +296,7 @@ def test_an_event_before_arming_does_not_block_the_send_after(config, caplog):
         dispatch.notice(shift("warning", "caution"))  # 무장 전
     assert phone.calls == []
     assert any(n.startswith("SMS 예정") for n in notes(caplog))
-    dispatch.arm(True)
+    dispatch.arming(True)
     dispatch.notice(shift("warning", "caution"))  # 무장 뒤 같은 구역·단계
     assert len(phone.calls) == len(once.calls) > 0
 
@@ -309,7 +309,7 @@ def test_events_before_arming_keep_the_experiment_cap(config, caplog):
     dispatch = Dispatch(settings(config, max_sms_per_experiment=2), KEYS, phone, runner=direct)
     for zone in ("A", "B", "C"):
         dispatch.notice(shift("warning", "caution", zone=zone))  # 무장 전 세 건
-    dispatch.arm(True)
+    dispatch.arming(True)
     with caplog.at_level(logging.WARNING):
         for zone in ("A", "B", "C"):
             dispatch.notice(shift("warning", "caution", zone=zone))

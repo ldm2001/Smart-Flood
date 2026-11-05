@@ -74,7 +74,7 @@ async def intake(service: ServiceDep, body: Message) -> Receipt:
 @router.post("/notifier/arm", response_model=Board)
 # 실제 발송을 무장·해제(켤 때만 재생·mode·환경 변수를 봄)
 async def latch(service: ServiceDep, body: Latch) -> Board:
-    service.arm(body.armed)
+    service.arming(body.armed)
     return Board.snapshot(service.snapshot)
 
 

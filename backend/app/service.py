@@ -180,7 +180,7 @@ class Experiment:
         if not 0.0 <= self._gain <= 1.0:
             raise ValueError(f"보정 이득은 0~1 이어야 한다: {self._gain}")
 
-    @property  # 속성처럼 읽음(조회)
+    @property
     # 최근 스냅샷. live 의 장치 상태는 읽는 때로 새로 봄(대기 중에는 tick 이 없음)
     def snapshot(self) -> Snapshot:
         snapshot = self._snapshot
@@ -704,11 +704,11 @@ class Experiment:
         return "stub", False
 
     # 실제 발송 무장·해제. 켤 때만 재생·mode·환경 변수를 보고 안 맞으면 409
-    def arm(self, on: bool) -> None:
+    def arming(self, on: bool) -> None:
         switch = self.notifier if isinstance(self.notifier, Switch) else None
         if not on:
             if switch is not None:
-                switch.arm(False)
+                switch.arming(False)
             return
         if self._replay is not None:
             raise Conflict("재생 중에는 실제 발송을 무장할 수 없다")
@@ -716,7 +716,7 @@ class Experiment:
             raise Conflict("notifier.mode 가 sms 가 아니라 무장할 수 없다")
         if not switch.ready:
             raise Conflict("발송 환경 변수가 없어 무장할 수 없다")
-        switch.arm(True)
+        switch.arming(True)
 
     # 시험 문자 한 건을 보내고 (가린 번호, 본문)을 돌려줌. 무장·횟수는 409, 발송 실패는 502
     def trial(self) -> tuple[str, str]:
@@ -739,7 +739,7 @@ class Experiment:
             raise Fault(("deviceId",), f"모르는 장치: {device} (있는 것: {known})")  # 422
         self._seen[device] = self.clock.monotonic()
         self._float = (device, message.get("floatSwitch"))  # 장치 상태에만 씀(수위·위험 판정 제외)
-        self._live.admit(message)
+        self._live.admission(message)
         if self._run_state != "running":
             self.renewal()  # 대기·정지 중에도 장치 상태를 새로 봄
 
@@ -788,7 +788,7 @@ class Experiment:
         return f"빗물받이 {numeral(location)} {BLOCKAGE_LABELS[kind]}"
 
 
-@contextmanager  # with 문에서 쓰는 도구로 만듦
+@contextmanager
 # 기록 입출력 오류를 Outage 로 변환(기록 조회 API 도 씀)
 def shield() -> Iterator[None]:
     try:

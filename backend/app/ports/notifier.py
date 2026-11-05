@@ -24,7 +24,7 @@ class Switch(Protocol):
     ready: bool  # 발송 환경 변수가 다 있는지
 
     # 무장·해제
-    def arm(self, on: bool) -> None:
+    def arming(self, on: bool) -> None:
         ...
 
     # 시험 문자 한 건을 바로 보내고 (가린 번호, 본문)을 돌려줌. 못 보내면 Spent
