@@ -29,7 +29,7 @@ sensor  (firmware/) -------------+
 [보드]  수위센서 --100 ms--> board.ino --> 릴레이 --> 펌프   (펌프는 보드 안에서만 제어)
            |
            |  POST /api/ingest  1초마다
-           |  deviceId  bootId  seq  tMs  readings(distA_mm)  sensorStatus  floatSwitch
+           |  deviceId  bootId  seq  tMs  readings(distA_mm)  sensorStatus  floatSwitch  running
            v
 [서버]  live 입력원이 메시지를 모음
            |
@@ -48,6 +48,9 @@ sensor  (firmware/) -------------+
 - 서버의 출력 잠금(`outputsLocked`)은 늘 `true` 다
 - `/api/ingest` 는 입력원이 `live` 일 때만 메시지를 tick 에 넣는다
 - 다른 입력원에서는 200 으로 받기만 한다
+- 보드가 보낸 `running` 이 켜지면 서버가 회차를 돌리지 않는 동안 입력원을 `live` 로 바꾸고 회차를 연 뒤 그 메시지부터 넣는다
+- `running` 이 꺼지면 그렇게 연 회차를 닫는다 (`backend/config.yaml` 의 `live.follow`)
+- 도는 `sim` 회차와 재생과 `/ops/` 에서 연 회차는 보드를 따라 열거나 닫지 않는다
 - 장치는 마지막 수신 뒤 5초가 지나면 오프라인으로 본다
 - 보드가 보낸 `floatSwitch` 는 `devices.floatSwitch` 로 나가 장치 상태 칸에 보인다
 - 플로트 값은 장치 상태에만 쓰고 수위와 위험 판정에는 쓰지 않는다
@@ -58,13 +61,16 @@ sensor  (firmware/) -------------+
 | 입력원 | 관측이 오는 곳 | 판정에 쓰는 수위 |
 |---|---|---|
 | `sim` | 가상 센서 (`adapters/sim_source.py`) | 보정한 모델 수위와 모델 변화율 |
-| `live` | 보드가 보낸 메시지 (`adapters/live.py`) | 3초 안의 관측이 있으면 관측 수위와 최근 20초 기울기 |
+| `live` | 보드가 보낸 메시지 (`adapters/live.py`) | 3초 안의 관측이 있으면 관측 수위와 최근 20초 기울기 · 센서 없는 구역은 A 수면 높이에서 옮긴 값 |
 | `replay` | `backend/logs/` 의 JSONL 기록 (`adapters/replay_source.py`) | 기록을 지금의 `config.yaml` 로 다시 계산한 값 |
 
 - 입력원은 `POST /api/source` 로 바꾼다
 - 회차가 도는 중에 바꾸려 하면 409 로 거절된다
 - 서버를 다시 띄우면 `sim` 으로 시작한다
 - 재생 중에는 기록 쓰기와 알림을 멈춘다
+- `live` 에서 센서 없는 B · C 는 A 수면 높이에서 구역 바닥 높이를 뺀 수위와 A 기울기로 판정한다 (보드 높이 40 · 70 · 110 mm 와 같은 도달 초)
+- `live` 회차 동안 위험 단계는 내려가지 않는다 (보드와 같다)
+- `live` 예측은 3초 안의 A 관측이 있으면 지금 수위에 실측 기울기와 시간을 곱한 값을 더해 낸다
 
 ## 모듈 계층
 
@@ -141,7 +147,9 @@ state() { curl -s http://127.0.0.1:8000/api/state | python3 -c "import json,sys;
 post() { curl -s -X POST "http://127.0.0.1:8000$1" -H 'Content-Type: application/json' -d "$2" | python3 -c "import json,sys; s=json.load(sys.stdin); print(s.get('detail') or '%s %s %s' % (s['dataSource'], s['runState'], s['experimentId']))"; }
 ```
 
-입력원을 `live` 로 바꾸고 회차를 시작한다
+보드 관제 화면에서 회차를 시작하면 서버가 따라서 입력원을 `live` 로 바꾸고 회차를 연다
+
+보드 없이 돌리거나 손으로 열 때는 입력원을 `live` 로 바꾸고 회차를 시작한다
 
 ```bash
 post /api/source '{"mode":"live"}'
@@ -163,7 +171,7 @@ cp firmware/board/secrets.h.example firmware/board/secrets.h
 - `STA_SSID` · `STA_PASS` 에 노트북이 붙은 `2.4 GHz` 와이파이를 적는다
 - `SERVER_URL` 에 경로 없이 `http://<노트북 IP>:8000` 을 적는다
 - 시리얼에 `서버 전송 HTTP 200` 이 찍히면 서버가 받았다
-- `state` 가 `live running online A=<수위> measured valid` 를 찍으면 이어진 것이다
+- 보드 관제 화면에서 회차를 시작한 뒤 `state` 가 `live running online A=<수위> measured valid` 를 찍으면 이어진 것이다
 
 ### 보드 없이 (창 3)
 
@@ -197,11 +205,15 @@ uvicorn app.main:app --port 8000    # http://localhost:8000/
 
 ### 끝낼 때
 
-창 2 에서 회차를 멈추고 창 1 에서 Ctrl+C 로 서버를 끈다
+보드를 따라 연 회차는 보드 관제 화면에서 정지하면 서버도 닫는다
+
+손으로 연 회차는 창 2 에서 멈춘다
 
 ```bash
 post /api/experiment/stop '{}'
 ```
+
+끝나면 창 1 에서 Ctrl+C 로 서버를 끈다
 
 ## 검증
 
