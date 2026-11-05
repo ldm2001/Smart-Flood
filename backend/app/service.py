@@ -14,7 +14,7 @@ from app.core.calibration import (
     drainage,
     waterline,
 )
-from app.core.danger import Rule, Watch, bulletin, patrol, shifts, slope
+from app.core.danger import Rule, Watch, bulletin, gauge, patrol, rising, shifts
 from app.core.model import (
     BLOCKAGE_TYPES,
     ZONES,
@@ -27,7 +27,7 @@ from app.core.model import (
     flux,
     gradient,
 )
-from app.core.predictor import Prediction, forecast
+from app.core.predictor import Prediction, forecast, trend
 from app.ports.clock import KST, Clock
 from app.ports.experiment_log import (
     EXPERIMENT_ID,
@@ -39,6 +39,7 @@ from app.ports.notifier import Notifier, Spent, Switch
 from app.ports.source import Source
 from app.schemas import (
     CONTRACT_HORIZONS_S,
+    LEVEL_LIMIT_M,
     Message,
     directive,
     event,
@@ -100,7 +101,8 @@ class Snapshot:
     data_source: str  # 입력원: sim · replay · live
     timestamp: datetime  # 상태 시각
     elapsed_s: float  # 경과 시간(초)
-    levels_m: dict[str, float]  # 표시 수위(m): A·B 는 최근 유효 관측, 없으면 모델
+    # 표시 수위(m): 최근 유효 관측, 없으면 A 수면 높이에서 옮긴 값(실측 판정), 그것도 없으면 모델
+    levels_m: dict[str, float]
     zone_sources: dict[str, str]  # 구역별 값의 출처
     rates_m_per_s: dict[str, float]  # 구역별 수위 변화율(m/s)
     prediction: Prediction  # 예측 결과
@@ -155,6 +157,13 @@ class Experiment:
         self._seen: dict[str, float] = {}  # 장치 → 마지막 수신 시각(단조 초)
         self._float: tuple[str | None, object] = (None, None)  # 마지막 메시지의 (장치, 플로트 값)
         self._absent: frozenset[str] = frozenset()  # 마지막 메시지에서 absent 였던 구역
+        section = config.get("live") or {}  # 실장치 설정(없으면 따라가기 끔)
+        follow = section.get("follow", False) if isinstance(section, dict) else None
+        if not isinstance(follow, bool):
+            raise ValueError(f"live.follow 는 true·false 여야 한다: {follow!r}")
+        self._follow = follow  # 보드 회차 따라감
+        self._board_running: bool | None = None  # 마지막으로 본 보드 running(처음은 모름)
+        self._followed: str | None = None  # 보드를 따라 연 회차의 실험 ID
         self.review()  # 계약대로 응답할 수 있는 구성인지 봄(아니면 기동에서 실패)
         self._config_hash = checksum(config)  # 설정 해시(회차마다 meta 줄에 구성을 그대로 적음)
 
@@ -562,13 +571,13 @@ class Experiment:
             fresh = [(elapsed, readings[z])] if z in readings else []
             samples = (*self._trail.get(z, ()), *fresh)
             trail[z] = tuple(s for s in samples if elapsed - s[0] <= window)
-        # 실측 판정 입력원이면 신선한 실측 구역은 실측 수위·기울기로 판정
-        if self._data_source in self._rule.measured_sources:
-            for z, (h, t) in latest.items():
-                if elapsed - t <= self._max_age_s:  # capture 와 같은 신선도
-                    levels[z], slopes[z] = max(0.0, h), slope(trail[z], window) or 0.0
-        watch = patrol(self._watch, levels, slopes, elapsed, self._rule)  # 구역별 경보 감시
-        snapshot = self.capture(state, elapsed, latest, absent, watch)
+        # 실측 판정 입력원이면 보드처럼 판정: 실측과 A 수면 높이, 최소 오름을 넘는 기울기, 단계 유지
+        view = self.survey(elapsed, latest, trail)  # 구역별 (실측 수위 m, 기울기 m/s)
+        for z, (h, r) in view.items():
+            levels[z], slopes[z] = h, rising(r, self._rule)
+        latch = self._data_source in self._rule.measured_sources  # 회차 동안 단계를 안 내림
+        watch = patrol(self._watch, levels, slopes, elapsed, self._rule, latch=latch)
+        snapshot = self.capture(state, elapsed, latest, absent, watch, view)
         record = frame(snapshot, state, corrections)
         notices = [  # 단계가 바뀐 구역의 stage 사건 줄
             self.advisory(z, previous, stage, eta, elapsed, snapshot.timestamp)
@@ -626,24 +635,39 @@ class Experiment:
         latest: dict[str, tuple[float, float]],
         absent: frozenset[str] | None = None,  # absent 구역(없으면 마지막 메시지의 것)
         watch: dict[str, Watch] | None = None,  # 경보 감시 상태(없으면 지금 것)
+        view: dict[str, tuple[float, float]] | None = None,  # 실측 판정 값(없으면 지금 것)
     ) -> Snapshot:
         absent = self._absent if absent is None else absent
         watch = self._watch if watch is None else watch
+        view = self.survey(elapsed_s, latest, self._trail) if view is None else view
         cond = self.conditions
-        prediction = forecast(
-            state,
-            cond,
-            self._params,
-            basis_elapsed_s=elapsed_s,
-            horizons_s=self._horizons_s,  # 예측 구간(초)
-            valid_for_s=self._valid_for_s,  # 예측 유효 시간(초)
-        )
+        if set(view) == set(ZONES):  # A 가 신선하면 보드처럼 실측 추세로 예측
+            prediction = trend(
+                view,
+                cond,
+                self._params,
+                basis_elapsed_s=elapsed_s,
+                horizons_s=self._horizons_s,
+                valid_for_s=self._valid_for_s,
+                cap_m=LEVEL_LIMIT_M,  # 계약 범위 안으로
+            )
+        else:
+            prediction = forecast(
+                state,
+                cond,
+                self._params,
+                basis_elapsed_s=elapsed_s,
+                horizons_s=self._horizons_s,  # 예측 구간(초)
+                valid_for_s=self._valid_for_s,  # 예측 유효 시간(초)
+            )
         flows = flux(state, cond, self._params)
         levels, sources = {}, {}
         for z in ZONES:
             reading = latest.get(z)  # 최근 관측(수위 m, 받은 경과 초)
             if reading is not None and elapsed_s - reading[1] <= self._max_age_s:
                 levels[z], sources[z] = max(0.0, reading[0]), OBSERVED_SOURCE[self._data_source]
+            elif z in view:  # 센서 없는 구역은 A 수면 높이에서 옮긴 값(0 아래는 0)
+                levels[z], sources[z] = max(0.0, view[z][0]), "estimated"
             else:
                 levels[z], sources[z] = depth(z, state.V[z], self._params), "estimated"
         kind, location = self._blockage
@@ -671,6 +695,19 @@ class Experiment:
             alerts=bulletin(watch),
             notifier=self.alarm(),  # 그 tick 의 방식·무장(기록 state 줄도 응답과 같게)
         )
+
+    # 실측 판정 입력원이면 구역별 (수위 m, 기울기 m/s): 신선한 실측과 A 수면 높이. 아니면 비어 있음
+    def survey(
+        self,
+        elapsed_s: float,
+        latest: dict[str, tuple[float, float]],
+        trail: dict[str, tuple[tuple[float, float], ...]],
+    ) -> dict[str, tuple[float, float]]:
+        if self._data_source not in self._rule.measured_sources:
+            return {}
+        fresh = {z: h for z, (h, t) in latest.items() if elapsed_s - t <= self._max_age_s}
+        floors = {z: self._params.zones[z].z_m for z in ZONES}  # 구역 바닥 높이(m)
+        return gauge(fresh, trail, floors, self._rule)
 
     # 단계 전환 사건 한 줄. 도달 초(올림한 정수)가 0 이면 "한계 도달", 안 오르면 생략
     def advisory(
@@ -732,6 +769,7 @@ class Experiment:
             raise Bounce(type(error).__name__) from None
 
     # 장치 메시지를 받아 둠(입력원이 live 일 때 다음 tick 에 쓰임). 모르는 장치는 422
+    # running 이 바뀌면 보드 회차를 따라감
     def intake(self, message: dict) -> None:
         device = message["deviceId"]
         if device not in self._allowed:
@@ -739,9 +777,29 @@ class Experiment:
             raise Fault(("deviceId",), f"모르는 장치: {device} (있는 것: {known})")  # 422
         self._seen[device] = self.clock.monotonic()
         self._float = (device, message.get("floatSwitch"))  # 장치 상태에만 씀(수위·위험 판정 제외)
+        self.tracking(message.get("running"))  # 회차를 열면 큐를 비우므로 받아 두기 전에
         self._live.admission(message)
         if self._run_state != "running":
             self.renewal()  # 대기·정지 중에도 장치 상태를 새로 봄
+
+    # 보드 회차 따라감. running 이 켜지면 쉬는 동안 live 로 바꿔 회차를 열고, 꺼지면 그 회차를 닫음
+    # 바뀔 때만 봄. 도는 회차·재생은 그대로 두고, 기록을 못 쓰면 다음 메시지에서 다시 엶
+    def tracking(self, running: bool | None) -> None:
+        if not self._follow or running is None or running == self._board_running:
+            return
+        if running and self._replay is None and self._run_state != "running":
+            try:
+                if self._data_source != "live":
+                    self.switch(self._live, "live")
+                self.opening(self._rain_mm, self._blockage)
+            except Outage as error:
+                log.warning("보드 회차를 따라 열지 못해 다음 메시지에서 다시 연다: %s", error)
+                return
+            self._followed = self._experiment_id
+            self.renewal()  # 연 회차를 바로 보임(launch 와 같음)
+        elif not running and self._replay is None and self._followed == self._experiment_id:
+            self.end()
+        self._board_running = running
 
     # 장치 상태. live 는 마지막 수신 뒤 offline_after_s 부터 offline, 그 밖은 시뮬레이션 값
     # floatSwitch 는 마지막 메시지의 값. 그 장치가 offline 이거나 값이 없거나 낯설면 unknown

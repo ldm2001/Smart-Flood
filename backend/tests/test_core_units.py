@@ -20,7 +20,7 @@ from app.core.model import (
     gradient,
     storage,
 )
-from app.core.predictor import forecast
+from app.core.predictor import TREND_RULE, forecast, trend
 from dataclasses import replace
 
 G = 9.81  # 중력가속도(m/s²)
@@ -202,6 +202,26 @@ def test_prediction_runs_on_a_copy_and_records_metadata(config, params):
     assert p.model_version == config["model_version"]
     assert p.assumptions["rain_mm_per_h"] == 90.0
     assert p.assumptions["blockage"] == {"INLET-02": "full"}
+
+
+# 실측 추세 예측: 수위 + 기울기 × 시간을 0 ~ 상한으로 자르고 가정 문장이 실측 추세인지 검사
+def test_trend_extends_the_measured_rise(params):
+    cond = Conditions(rain_mm_per_h=20.0, blockage={"INLET-01": "partial"})
+    view = {"A": (0.030, 0.001), "B": (0.010, 0.001), "C": (-0.030, 0.001)}
+    p = trend(
+        view, cond, params, basis_elapsed_s=31.0, horizons_s=[30, 10, 20], valid_for_s=5.0,
+        cap_m=0.045,
+    )
+    assert p.levels_m["A"] == {10: pytest.approx(0.040), 20: 0.045, 30: 0.045}  # 상한 0.045
+    assert p.levels_m["B"] == pytest.approx({10: 0.020, 20: 0.030, 30: 0.040})
+    assert p.levels_m["C"] == pytest.approx({10: 0.0, 20: 0.0, 30: 0.0})  # 음수는 0
+    assert p.assumptions == {
+        "rule": TREND_RULE, "rain_mm_per_h": 20.0, "blockage": {"INLET-01": "partial"}
+    }
+    assert (p.basis_elapsed_s, p.valid_for_s, p.model_version) == (31.0, 5.0, params.model_version)
+    falling = trend({"A": (0.030, -0.001)}, cond, params, basis_elapsed_s=0.0, horizons_s=[10],
+                    valid_for_s=5.0, cap_m=0.5)
+    assert falling.levels_m["A"] == {10: pytest.approx(0.020)}  # 내리면 보드처럼 내림
 
 
 
