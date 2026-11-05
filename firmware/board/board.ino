@@ -378,6 +378,8 @@ void outcome(int code) {
 
 // 1초마다: 수위를 서버 메시지 모양(distA_mm 는 설치 높이 - 수위)으로 보냄. 이상이면 null 과 fault
 // floatSwitch 는 급수통 물 부족이면 low, 아니면 normal
+// running 은 회차가 열려 있으면 true(안전 정지 중에도), 정지 명령 뒤 false
+// 서버가 보드 회차를 따라가는 데 씀
 void ingest() {
   if (!*SERVER_URL || WiFi.status() != WL_CONNECTED) return;
   size_t n = strlen(SERVER_URL);
@@ -392,15 +394,15 @@ void ingest() {
     return;
   }
   http.addHeader("Content-Type", "application/json");
-  char body[320];  // 가장 긴 본문 218 B(센서 이상, seq·tMs 10자리)
+  char body[320];  // 가장 긴 본문 234 B(센서 이상, seq·tMs 10자리, running false)
   snprintf(body, sizeof(body),
            "{\"deviceId\":\"%s\",\"bootId\":\"%s\",\"seq\":%lu,\"tMs\":%lu,"
            "\"readings\":{\"distA_mm\":%s,\"distB_mm\":null,\"weight_g\":null},"
            "\"sensorStatus\":{\"A\":\"%s\",\"B\":\"absent\",\"load\":\"absent\"},"
-           "\"floatSwitch\":\"%s\"}",
+           "\"floatSwitch\":\"%s\",\"running\":%s}",
            DEVICE_ID, bootId.c_str(), (unsigned long)seqNo++, (unsigned long)millis(),
            fault ? "null" : String(INSTALL_HEIGHT_MM - levelMm, 1).c_str(),
-           fault ? "fault" : "ok", floatLow ? "low" : "normal");
+           fault ? "fault" : "ok", floatLow ? "low" : "normal", running ? "true" : "false");
   outcome(http.POST((uint8_t*)body, strlen(body)));
   http.end();
 }

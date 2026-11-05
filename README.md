@@ -53,6 +53,8 @@ ESP32 스케치를 만들고 부품을 하나씩 보드에 붙여 시험한다
 - 이 값은 `backend/config.yaml` 의 `sensors.A.install_height_mm` 와 같아야 한다
 - 센서 이상이면 `distA_mm` 를 `null` 로 하고 `A` 를 `fault` 로 보낸다
 - 급수통 플로트 상태도 `floatSwitch` 로 함께 보낸다 (물이 모자라면 `low` 이고 아니면 `normal`)
+- 회차가 열려 있는지도 `running` 으로 함께 보낸다 (안전 정지 중에도 `true` 이고 정지 명령 뒤에는 `false`)
+- 서버는 이 값을 따라 보드 회차가 시작되면 live 로 바꿔 회차를 열고 보드가 정지하면 그 회차를 닫는다 (`backend/config.yaml` 의 `live.follow`)
 - 와이파이가 끊기면 10초마다 다시 붙고 그동안 측정 · 펌프 제어 · 알림 판단은 계속 돈다
 - 연결과 읽기 제한이 각 400 ms 라 서버가 꺼져 있어도 펌프 제어 루프가 오래 막히지 않는다
 - 휴대폰 푸시(ntfy)는 대기열과 별도 태스크로 보낸다
