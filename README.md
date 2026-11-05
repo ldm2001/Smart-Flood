@@ -1,155 +1,192 @@
-# SMART FLOOD sim
+# SMART FLOOD dev
 
-`sim` 은 시뮬레이션 공간이다
+`dev` 는 통합 브랜치다
 
-가상 센서로 실험을 돌리며 서버와 관제 웹을 만든다
+`sim` 의 서버와 웹을 `sensor` 의 펌웨어와 한곳에 모아 실제 보드로 시험한다
 
-`backend/` 와 `frontend/` 만 담고 펌웨어는 `sensor` 가 맡는다
+시험을 마친 `dev` 를 `main` 이 받는다
 
-여기서 만든 것은 `dev` 로 합친다
+## 브랜치 흐름
 
-## 만든 것
+```text
+sim     (backend/ + frontend/) --+
+                                 +--> dev (셋 모두) --> main
+sensor  (firmware/) -------------+
+```
 
-### 물수지 모델과 보정
+- 합치는 방향은 한쪽뿐이다
+- `sim` 과 `sensor` 는 `dev` 와 `main` 을 받지 않는다
+- 받으면 상대 공간의 폴더가 딸려 오기 때문이다
+- 풀리퀘스트의 대상은 `dev` 다
+- `dev` 에서 검증 명령이 모두 통과하고 보드를 붙인 시험을 거치면 `main` 으로 올린다
+- `main` 으로 합칠 때는 "Create a merge commit" 을 쓴다
+- 코드는 `sim` 과 `sensor` 에서만 고친다
+- README 는 브랜치마다 따로 두고 합칠 때 겹치면 받는 쪽 것을 남긴다
 
-- `backend/app/core/model.py` 가 구역 A·B·C 의 물 부피를 강우 · 구역 사이 월류 · 빗물받이 배수로 적분한다
-- `backend/app/core/calibration.py` 가 센서 거리를 수위로 바꾸고 관측 수위로 모델 상태를 보정한다
-- 내부 계산은 SI 단위이고 API 는 mm · L · L/min 으로 낸다
-- 모든 계수는 `backend/config.yaml` 에 있다
+## 데이터 흐름
 
-### 예측
+```text
+[보드]  수위센서 --100 ms--> board.ino --> 릴레이 --> 펌프   (펌프는 보드 안에서만 제어)
+           |
+           |  POST /api/ingest  1초마다
+           |  deviceId  bootId  seq  tMs  readings(distA_mm)  sensorStatus  floatSwitch
+           v
+[서버]  live 입력원이 메시지를 모음
+           |
+           v  1 Hz tick
+        inbox > 관측 수위 환산 > 모델 한 걸음 > 관측 보정 > 위험 단계 판정
+              > 10 20 30초 예측과 스냅숏 > JSONL 기록 > 알림 포트 (stub 또는 시험 문자)
+           |
+           |  GET /api/state
+           v
+[웹]    1초마다 읽음 > zod 검사 > lib/derive 파생 계산 > 화면
+        단계가 바뀌면 GET /api/logs/{id}/events 로 사건을 다시 읽음
+```
 
-- `backend/app/core/predictor.py` 가 보정한 상태에서 10·20·30초 뒤 수위를 낸다
-- 예측은 `/api/state` 의 `predictions` 로 나간다
+- 보드는 서버와 따로 돈다
+- 서버가 꺼져도 보드의 측정 · 펌프 제어 · 알림 판단은 계속 돈다
+- 서버의 출력 잠금(`outputsLocked`)은 늘 `true` 다
+- `/api/ingest` 는 입력원이 `live` 일 때만 메시지를 tick 에 넣는다
+- 다른 입력원에서는 200 으로 받기만 한다
+- 장치는 마지막 수신 뒤 5초가 지나면 오프라인으로 본다
+- 보드가 보낸 `floatSwitch` 는 `devices.floatSwitch` 로 나가 장치 상태 칸에 보인다
+- 플로트 값은 장치 상태에만 쓰고 수위와 위험 판정에는 쓰지 않는다
+- 서버 안은 SI 단위로 계산하고 API 는 mm · L · L/min 으로 낸다
 
-### 입력원
+## 입력원
 
-| 입력원 | 관측이 오는 곳 | 어댑터 |
+| 입력원 | 관측이 오는 곳 | 판정에 쓰는 수위 |
 |---|---|---|
-| `sim` | 가상 센서 | `adapters/sim_source.py` |
-| `live` | `POST /api/ingest` 로 받은 장치 메시지 | `adapters/live.py` |
-| `replay` | JSONL 실험 기록 | `adapters/replay_source.py` |
+| `sim` | 가상 센서 (`adapters/sim_source.py`) | 보정한 모델 수위와 모델 변화율 |
+| `live` | 보드가 보낸 메시지 (`adapters/live.py`) | 3초 안의 관측이 있으면 관측 수위와 최근 20초 기울기 |
+| `replay` | `backend/logs/` 의 JSONL 기록 (`adapters/replay_source.py`) | 기록을 지금의 `config.yaml` 로 다시 계산한 값 |
 
-- 가상 센서는 운영 모델과 같은 식에서 계수 일부를 15% 바꾸고 잡음을 더해 참값을 만든다
-- 실측에서는 장치 상태(마지막 수신 뒤 5초)와 입력 품질을 가른다
-- 보드가 보낸 `floatSwitch` 는 장치 상태의 플로트 스위치 칸에만 쓴다
-
-### 위험 단계
-
-`backend/app/core/danger.py` 가 tick 마다 구역 단계를 판정한다
-
-| 단계 | 계약 이름 | 조건 |
-|---|---|---|
-| 주의 | `caution` | 한계 수위 도달 예상 60초 안 |
-| 경계 | `warning` | 도달 예상 30초 안 |
-| 침수 | `evacuate` | 한계 수위 이상 |
-
-- 오름은 바로 반영하고 내림은 10초 유지한 뒤 반영한다
-- 침수는 한계의 90% 아래로 내려가야 풀린다
-- 실측 중에는 3초 안의 관측이 있는 구역을 관측 수위와 최근 20초 최소제곱 기울기로 판정한다
-- 도달 초 `etaSec` 는 올림한 정수 초다
-- 단계가 바뀌면 `stage` 사건을 기록하고 알림 포트로 보낸다
-
-### 알림과 시험 문자
-
-- 기본은 `notifier.mode: stub` 이고 서버 로그에 WARNING 한 줄만 남긴다
-- 실제 문자는 세 조건이 모두 맞을 때만 허용 번호(`SMS_ALLOWED_TO`)로 보낸다
-
-| 조건 | 맞추는 곳 |
-|---|---|
-| 방식 | `backend/config.yaml` 의 `notifier.mode: sms` |
-| 환경 변수 | `SOLAPI_API_KEY` · `SOLAPI_API_SECRET` · `SOLAPI_SENDER` · `SMS_ALLOWED_TO` |
-| 무장 | `POST /api/notifier/arm` 에 `{"armed": true}` |
-
-- 문자는 경계와 침수로 오르는 전환에만 (실험 · 구역 · 단계)마다 한 번 간다
-- 한 실험의 상한은 10건이고 시험 문자는 서버 실행당 3번이다
-- 발송은 tick 밖의 스레드가 맡는다 (`adapters/dispatch.py` · `adapters/solapi.py`)
-- 서버 로그의 번호는 뒤 4자리만 보인다
-- `backend/scripts/sms.py` 로 서버 없이 한 건을 손으로 보내 본다
-
-### 기록과 재생
-
-- 회차마다 `backend/logs/` 에 JSONL 파일 하나를 쓴다
-- 한 tick 의 관측 · 상태 · 사건 줄을 한 번에 쓴다
-- `GET /api/logs` 로 목록을 읽고 `GET /api/logs/{id}/events` 로 사건을 읽는다
-- 재생은 기록된 관측과 조작을 다시 넣고 지금의 `config.yaml` 로 다시 계산한다
+- 입력원은 `POST /api/source` 로 바꾼다
+- 회차가 도는 중에 바꾸려 하면 409 로 거절된다
+- 서버를 다시 띄우면 `sim` 으로 시작한다
 - 재생 중에는 기록 쓰기와 알림을 멈춘다
 
-### 관제 웹
+## 모듈 계층
 
-| 화면 | 칸 |
-|---|---|
-| `/` 종합 관제 | 상태 배너 · 대피 안내 한 줄 · 구역 게이지 · 수위 차트 · 도시 평면도 · 현장 장치 상태 · 위험 판단 타임라인 · 이벤트 기록 |
-| `/ops/` 운영·설정 | 회차 시작·종료·초기화 · 입력원 전환 · 강우 단계와 직접 입력 · 막힘 종류와 빗물받이 · 한계 수위 보기 |
-| `/logs/` 기록·재생 | 실험 기록 목록 · 구역별 예측 도달과 실제 도달 비교 · 판정 칸(적중 · 누락 · 오경보 · 대기) · 기록 재생 시작 |
+화살표는 가져다 쓰는 방향이다
 
-- 위험 단계와 사건은 서버 `alerts` 와 서버 기록만 따른다
-- 장치 상태 칸은 급수통 플로트의 물 부족을 보여 준다
-- 글꼴은 Pretendard 이고 자간 -3% 와 12 이상 짝수 글자 크기를 쓴다
-- 여러 줄로 접히는 글은 줄 높이 150% 이고 한 줄 글은 기본 줄 높이다
-- 서버가 한 번도 답하지 않으면 가상 데이터를 보여 주고 "가상 데이터(서버 미연결)" 를 단다
-- 전시 때는 FastAPI 한 대가 `frontend/out/` 을 함께 내보낸다
+```text
+backend/app
+├── main.py        조립: 어댑터를 골라 service 에 넣고 라우터와 frontend/out 을 붙임
+├── api/           HTTP 라우터 state · control · logs              --> service · schemas · ports
+├── service.py     회차 · 입력원 전환 · 1 Hz tick                   --> core · ports · schemas · adapters(live · replay · stub)
+├── schemas.py     /api/state 와 ingest 메시지 꼴                    --> core
+├── core/          순수 로직 model · predictor · calibration · danger · message
+│                  시간은 인자로 받음                                 --> core 안에서만
+├── ports/         Protocol source · clock · experiment_log · notifier --> core 의 형
+└── adapters/      구현 sim_source · live · replay_source · clock
+                   jsonl_log · stub · dispatch · solapi              --> ports · core · schemas
 
-### 단계별로 만든 것
+frontend/src
+├── app/           쪽 / · /ops/ · /logs/                             --> components
+├── components/    화면 칸 MonitorView · OpsView · LogsView 와 패널   --> lib
+└── lib/
+    ├── useSnapshot · useEvents · useNow · useSettings  구독 훅       --> api · derive · schema
+    ├── api.ts     서버 요청과 zod 검사                               --> schema · useNow
+    ├── schema.ts  /api/state 의 zod 스키마
+    ├── derive.ts  순수 파생 계산 (시간은 인자)                       --> schema · layout-data · api
+    └── layout-data.ts · mock.ts  이름표 · 평면도 자리 · 가상 데이터  --> derive · schema
 
-| 단계 | 만든 것 |
-|---|---|
-| M1 | 물수지 모델 · 예측 · 관측 보정 |
-| M2 | 가상 센서 · 1 Hz tick · `/api/state` · 제어 API |
-| M3 | JSONL 실험 기록 · 재생 |
-| M4 | `/api/ingest` · 장치 상태 · 입력 품질 |
-| M5 | 위험 단계 · `stage` 사건 · 기록용 기본 알림 |
-| M6 | 세 조건 시험 문자 발송 |
-| S0 | 웹 뼈대 · zod 스키마 · 파생 계산 · mock 화면 |
-| S1 | 상태 배너 · 구역 게이지 · 수위 차트 · 서버 연결 |
-| S2 | 도시 평면도 · 장치 상태 · 위험 판단 타임라인 · 이벤트 기록 |
-| S3 | `/ops/` 운영·설정 화면 |
-| S4 | `/logs/` 기록·재생 화면 |
-| S5 | 대비와 글자 크기 점검 · FastAPI 의 `out/` 서빙 |
-| 2026-11-04 | 실측 구역의 관측 판정 · 대피 안내 한 줄 · 기록 화면 판정 칸 |
-| 2026-11-05 | 보드 플로트 값의 장치 상태 표시 · Pretendard 글꼴과 글자 규칙 · 함수 이름 정리 |
+firmware
+├── board/         본 스케치 board.ino · page.h · secrets.h          --> POST /api/ingest
+├── parts/         부품 시험 led · net · reed · relay · depth        --> 부품 하나씩
+└── python/        MicroPython 판
+    ├── main.py    보드 층 ADC · 와이파이 · 감시 타이머              --> node · level · ingest · client
+    ├── host.py    컴퓨터 실행기                                     --> node · level · ingest · client
+    └── node.py    100 ms 표본 · 1초 전송 루프                        --> level · ingest
+```
 
-## 실행
+- `core` 는 `adapters` 와 웹 프레임워크를 모르는 순수 계층이다
+- 바깥 입출력은 `ports` 의 Protocol 로 받고 `adapters` 가 구현한다
+- 웹과 서버는 `/api/*` JSON 으로만 이어진다
+- 보드와 서버는 `POST /api/ingest` 메시지로만 이어진다
+- `/api/state` 계약은 서버가 갖고 웹의 zod 스키마가 같은 제약을 지킨다
 
-Python `3.11` 이 필요하다
+## 보드와 함께 띄우기
+
+아래는 macOS 명령이다
+
+Windows 명령은 `firmware/README.md` 의 "보드 시험 따라하기 (Windows·macOS)" 절에 있다
+
+### 가상 환경 (처음 한 번)
+
+저장소 맨 위에 가상 환경을 만든다
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r backend/requirements.txt esptool mpremote
+```
+
+### 서버 (창 1)
+
+모든 주소로 듣게 서버를 띄운다
 
 ```bash
 cd backend
-python3 -m pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-`http://localhost:8000/api/state` 에서 상태를 본다
+### 입력원과 회차 (창 2)
 
-실험은 제어 API 로 시작하고 바꾼다
+상태를 보는 `state` 와 요청을 보내는 `post` 를 붙여 넣는다
 
 ```bash
-curl -X POST localhost:8000/api/experiment/start -H 'Content-Type: application/json' \
-     -d '{"rain": "heavy", "blockage": {"type": "partial", "location": "INLET-02"}}'
-curl -X POST localhost:8000/api/rain -H 'Content-Type: application/json' -d '{"mmPerHour": 75}'
-curl -X POST localhost:8000/api/experiment/stop -H 'Content-Type: application/json' -d '{}'
+state() { curl -s http://127.0.0.1:8000/api/state | python3 -c "import json,sys; s=json.load(sys.stdin); print(s['dataSource'], s['runState'], s['devices']['esp32_1'], 'A=%s' % s['zones']['A']['levelMm'], s['zones']['A']['source'], s['quality'])"; }
+post() { curl -s -X POST "http://127.0.0.1:8000$1" -H 'Content-Type: application/json' -d "$2" | python3 -c "import json,sys; s=json.load(sys.stdin); print(s.get('detail') or '%s %s %s' % (s['dataSource'], s['runState'], s['experimentId']))"; }
 ```
 
-기록 목록을 읽고 기록을 재생한 뒤 시뮬레이션으로 돌아온다
+입력원을 `live` 로 바꾸고 회차를 시작한다
 
 ```bash
-curl localhost:8000/api/logs
-curl -X POST localhost:8000/api/source -H 'Content-Type: application/json' \
-     -d '{"mode": "replay", "logId": "EXP-20261027-001"}'
-curl -X POST localhost:8000/api/source -H 'Content-Type: application/json' -d '{"mode": "sim"}'
+post /api/source '{"mode":"live"}'
+state
 ```
 
-관제 웹은 Node 24 가 필요하고 다른 터미널에서 띄운다
+```bash
+post /api/experiment/start '{}'
+```
 
-PATH 와 환경 변수는 `frontend/README.md` 에 있다
+### 보드
+
+접속 정보를 넣고 `firmware/board/board.ino` 를 올린다
 
 ```bash
+cp firmware/board/secrets.h.example firmware/board/secrets.h
+```
+
+- `STA_SSID` · `STA_PASS` 에 노트북이 붙은 `2.4 GHz` 와이파이를 적는다
+- `SERVER_URL` 에 경로 없이 `http://<노트북 IP>:8000` 을 적는다
+- 시리얼에 `서버 전송 HTTP 200` 이 찍히면 서버가 받았다
+- `state` 가 `live running online A=<수위> measured valid` 를 찍으면 이어진 것이다
+
+### 보드 없이 (창 3)
+
+컴퓨터가 보드 노릇을 하며 서버까지 가는 길을 확인한다
+
+```bash
+cd firmware/python
+python host.py --server http://localhost:8000 --mm 40 --seconds 20
+```
+
+### 관제 웹 (창 4)
+
+관제 웹을 띄우고 `http://localhost:3000` 을 연다
+
+```bash
+export PATH="/opt/homebrew/opt/node@24/bin:$PATH"
 cd frontend
-npm install
-npm run dev    # http://localhost:3000
+npm ci
+echo 'NEXT_PUBLIC_API_BASE=http://localhost:8000' > .env.development.local
+npm run dev
 ```
 
-전시 때는 서버 한 대로 띄운다
+서버 한 대로 볼 때는 `frontend/out/` 을 만든 뒤 서버를 띄우고 `http://localhost:8000/` 을 연다
 
 ```bash
 cd frontend
@@ -158,26 +195,17 @@ cd ../backend
 uvicorn app.main:app --port 8000    # http://localhost:8000/
 ```
 
-시험 문자는 `backend/.env` 를 채우고 `notifier.mode` 를 `sms` 로 바꾼 뒤 띄운다
+### 끝낼 때
 
-`backend/.env` 는 커밋하지 않는다
-
-```bash
-cd backend
-cp .env.example .env    # 값을 채운다
-set -a && . ./.env && set +a
-uvicorn app.main:app --port 8000
-```
-
-다른 터미널에서 무장하고 시험 문자를 보낸 뒤 무장을 푼다
+창 2 에서 회차를 멈추고 창 1 에서 Ctrl+C 로 서버를 끈다
 
 ```bash
-curl -X POST localhost:8000/api/notifier/arm -H 'Content-Type: application/json' -d '{"armed": true}'
-curl -X POST localhost:8000/api/notifier/test -H 'Content-Type: application/json' -d '{}'
-curl -X POST localhost:8000/api/notifier/arm -H 'Content-Type: application/json' -d '{"armed": false}'
+post /api/experiment/stop '{}'
 ```
 
 ## 검증
+
+`dev` 에서 셋이 모두 통과해야 `main` 으로 올린다
 
 ```bash
 cd backend
@@ -187,4 +215,10 @@ pytest && ruff check .
 ```bash
 cd frontend
 npm run lint && npm run typecheck && npm test && npm run build
+```
+
+```bash
+cd firmware/python
+python -m pytest -q
+ruff check .
 ```
