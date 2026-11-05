@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- 탭 아이콘. 머리글 로고의 물결과 같은 모양. 바탕은 panel 색, 선은 brand 색 -->
+  <!-- 탭 아이콘. 바탕은 panel 색, 선은 brand 색 -->
   <rect width="32" height="32" rx="7" fill="#11141c"/>
   <path d="M5 16q2.75-3 5.5 0t5.5 0 5.5 0 5.5 0" fill="none" stroke="#5aa9f0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { Glyph } from "@/components/Glyph";
 import { Menu } from "@/components/Menu";
 import "./globals.css";
 
@@ -34,8 +33,7 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
           <aside className="border-b border-line bg-sidebar p-3 md:sticky md:top-0 md:flex md:h-screen md:w-60 md:shrink-0 md:flex-col md:border-r md:border-b-0 md:px-4 md:py-7">
             {// 로고 링크. 누르면 첫 화면으로 감
             }
-            <Link href="/" className="mb-3 flex h-10 items-center gap-2 px-3 text-lg font-semibold md:mb-6">
-              <Glyph name="wave" className="size-6 text-brand" />
+            <Link href="/" className="mb-3 flex h-10 items-center px-3 text-lg font-semibold md:mb-6">
               SMART FLOOD
             </Link>
             {// 메뉴 목록 영역. 좁으면 옆으로 밀어 봄

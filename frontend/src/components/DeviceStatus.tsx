@@ -18,7 +18,7 @@ const mark = (ok: boolean) => (
 
 // 보호 입력과 입력 품질, 출력 잠금
 export function Devices({ snapshot }: { snapshot: Snapshot | null }) {
-  const ready = snapshot && readiness(snapshot.devices);  // 보호 입력 넷의 정상 여부. 연결 중 null
+  const ready = snapshot && readiness(snapshot.devices);  // 보호 입력 둘의 정상 여부. 연결 중 null
   return (
     <section aria-label="현장 장치 상태" className="panel p-5">
       <h2 className="mb-4 text-lg font-medium">현장 장치 상태</h2>
@@ -55,8 +55,8 @@ export function Devices({ snapshot }: { snapshot: Snapshot | null }) {
       }
       <p className="mt-4 text-base leading-normal text-muted">
         가상·재생 입력에서는 장치 값이 늘 정상으로 나옵니다. 실측 입력에서는 마지막 메시지 뒤
-        5초 안의 장치만 정상이고, 한 번도 오지 않은 장치는 끊김, 플로트 스위치는 보드가 보낸
-        정상·물 부족, 비상정지는 메시지에 없어 미상으로 보입니다.
+        5초 안이면 ESP32 가 정상이고 그렇지 않으면 끊김입니다. 플로트 스위치는 보드가 보낸
+        정상·물 부족을 그대로 보이고 값이 없거나 ESP32 가 끊기면 미상입니다.
       </p>
       <p className="mt-1 text-base leading-normal text-muted">웹 화면은 안전 차단을 대신하지 않습니다.</p>
     </section>

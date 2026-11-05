@@ -395,7 +395,7 @@ export function condition(value: string): { label: string; ok: boolean } {
   return { label, ok: value === "online" || value === "normal" };
 }
 
-// 보호 입력 넷의 정상 여부
+// 보호 입력 둘(ESP32 와 플로트 스위치)의 정상 여부
 export function readiness(devices: Snapshot["devices"]): boolean {
   return DEVICE_KEYS.every((key) => condition(devices[key]).ok);
 }

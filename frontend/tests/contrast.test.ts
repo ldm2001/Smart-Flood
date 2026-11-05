@@ -17,7 +17,7 @@ const share = Number(mixed) / 100;  // 옅은 바탕(--tint)에 섞는 단계 �
 
 // grep 으로 확인한 글자·바탕 짝. 바탕 토큰 → 그 위 글자 토큰
 const PAIRS: Record<string, string[]> = {
-  sidebar: ["ink", "soft", "brand"],  // 로고 글·메뉴 글·로고 아이콘
+  sidebar: ["ink", "soft", "brand"],  // 로고 글·메뉴 글·메뉴 초점 테두리
   bg: ["ink", "soft", "muted", "amber"],  // 머리글·입력칸·바닥글·모의 자료 칩(투명)
   panel: ["ink", "soft", "muted", "green", "amber", "orange", "red"],  // 카드 글·단계 글
   raised: ["ink", "soft", "muted", "green", "amber", "red"],  // 칩·지금 메뉴·연결 아이콘
