@@ -94,17 +94,15 @@ export const PLAN_PIPE = { y: 135, from: 35, to: 230 };  // 하부 배수관
 
 export const PLAN_METER = { x: 230, y: 125, width: 60, height: 25 };  // 배수 계량 상자
 
-// 보호 입력 넷(장치 둘, 플로트, 비상정지)
-export const DEVICE_KEYS = ["esp32_1", "esp32_2", "floatSwitch", "emergencyStop"] as const;
+// 보호 입력 둘(ESP32 한 대와 플로트 스위치). 둘째 ESP32 와 비상정지는 REV16 에 없음
+export const DEVICE_KEYS = ["esp32_1", "floatSwitch"] as const;
 
 // 장치 이름 타입
 export type Device = (typeof DEVICE_KEYS)[number];
 
 export const DEVICE_NAMES: Record<Device, string> = {  // 장치 표시 이름
-  esp32_1: "ESP32 #1",
-  esp32_2: "ESP32 #2",
+  esp32_1: "ESP32",
   floatSwitch: "플로트 스위치",
-  emergencyStop: "비상정지",
 };
 
 export const DEVICE_LABELS = {  // 장치 값 표시 글. 목록에 없는 값은 그대로 보임

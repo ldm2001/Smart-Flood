@@ -618,15 +618,17 @@ describe("devices", () => {
     expect(condition("constructor")).toEqual({ label: "constructor", ok: false });
   });
 
-  it("is ready only when all four protection inputs are healthy", () => {
+  it("is ready when the ESP32 and the float switch are healthy", () => {
     expect(readiness(LIVE.devices)).toBe(true);  // 시뮬레이션 장치 값
-    const rev16 = {  // REV16 실측 입력의 장치 값
+    const rev16 = {  // REV16 실측 입력의 장치 값. 둘째 ESP32 와 비상정지는 늘 끊김과 미상
       esp32_1: "online",
       esp32_2: "offline",
-      floatSwitch: "unknown",
+      floatSwitch: "normal",
       emergencyStop: "unknown",
     };
-    expect(readiness(rev16)).toBe(false);
+    expect(readiness(rev16)).toBe(true);
+    expect(readiness({ ...rev16, esp32_1: "offline" })).toBe(false);  // ESP32 가 끊기면 확인
+    expect(readiness({ ...rev16, floatSwitch: "unknown" })).toBe(false);  // 플로트 값이 없으면 확인
     expect(readiness({ ...LIVE.devices, floatSwitch: "low" })).toBe(false);  // 물 부족이면 확인
   });
 });
