@@ -16,7 +16,7 @@ class Sensor:
     min_range_mm: float  # 가장 가까운 유효 거리(데드존, mm)
     max_range_mm: float  # 가장 먼 유효 거리(mm)
 
-    @classmethod  # 클래스 메서드(인스턴스 없이 부름)
+    @classmethod
     # 설정 한 덩어리로 센서 보정값을 만듦
     def config(cls, cfg: dict) -> Sensor:
         return cls(
@@ -33,7 +33,7 @@ class Sensor:
 class Load:
     tare_g: float  # 빈 통 무게(g)
 
-    @classmethod  # 클래스 메서드(인스턴스 없이 부름)
+    @classmethod
     # 설정 한 덩어리로 무게 보정값을 만듦
     def config(cls, cfg: dict) -> Load:
         return cls(tare_g=float(cfg["tare_g"]))

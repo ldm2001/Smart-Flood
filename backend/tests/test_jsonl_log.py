@@ -1,6 +1,6 @@
 import json
 import pytest
-from app.adapters.jsonl_log import LOG_DIR, Jsonl, dump
+from app.adapters.jsonl_log import LOG_DIR, Jsonl, jsonline
 from app.ports.experiment_log import Absence, Flaw
 from tests.helpers import breakage, shortage
 
@@ -174,7 +174,7 @@ def test_a_batch_cut_short_in_its_second_line_leaves_none_of_its_lines(tmp_path,
     meta = {"type": "meta", "experimentId": ID}
     log.entry(ID, meta)
     obs = {"type": "obs", "elapsedSec": 1.0, "readings": {"distA_mm": 598.375}}
-    shortage(monkeypatch, room=len(dump(obs)) + 5)  # 첫째 줄은 들어가고 둘째 줄은 5 바이트만
+    shortage(monkeypatch, room=len(jsonline(obs)) + 5)  # 첫째 줄은 들어가고 둘째 줄은 5 바이트만
     with pytest.raises(OSError):
         log.batch(ID, [obs, {"type": "state", "elapsedSec": 1.0}])
     monkeypatch.undo()

@@ -1,7 +1,22 @@
 @import "tailwindcss";
 @import "../styles/tokens.css";
 
-/* 본문은 16px 이상(지시서 6장) */
+/* 줄 높이. 한 줄 글은 normal(피그마 auto)을 기본으로 둠. 테일윈드 글자 크기 유틸이
+   함께 넣는 줄 높이도 normal 로 맞춤. 두 줄 이상 될 수 있는 글은 leading-normal(150%)을 붙임 */
+@theme {
+  --text-xs--line-height: normal;
+  --text-sm--line-height: normal;
+  --text-base--line-height: normal;
+  --text-lg--line-height: normal;
+  --text-xl--line-height: normal;
+  --text-2xl--line-height: normal;
+  --text-3xl--line-height: normal;
+  --text-4xl--line-height: normal;
+  --text-key--line-height: normal;
+  --text-figure--line-height: normal;
+}
+
+/* 본문은 16px 이상(지시서 6장). 글자 크기는 12px 이상 짝수만 씀 */
 @layer base {
   html {
     background: var(--bg);
@@ -15,8 +30,20 @@
   body {
     min-height: 100vh;
     font-size: 1rem;
-    line-height: 1.6;
+    line-height: normal;  /* 한 줄 글 기본. 여러 줄 글은 leading-normal 로 150% */
     background: var(--bg);
+  }
+
+  /* 자간은 글자 크기의 -3%. 요소마다 제 글자 크기로 셈(물려받으면 부모 크기 값이 됨).
+     button·input 등은 preflight 의 letter-spacing: inherit 보다 앞서도록 이름을 적음 */
+  *,
+  ::before,
+  ::after,
+  button,
+  input,
+  select,
+  textarea {
+    letter-spacing: -0.03em;
   }
 }
 

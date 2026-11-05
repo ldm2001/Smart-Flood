@@ -54,7 +54,7 @@ def test_header():
 # 허용 번호 한 건: 주소·머리글·본문 JSON·제한 초
 def test_send():
     solapi, fake = sender()
-    solapi.send("010-" + "1234" + "-5678", "[SMARTFLOOD시연] 테스트 문자입니다 16:30")
+    solapi.outbox("010-" + "1234" + "-5678", "[SMARTFLOOD시연] 테스트 문자입니다 16:30")
     [(url, headers, content, timeout)] = fake.calls
     assert url == URL == "https://api.solapi.com/messages/v4/send-many/detail"
     assert timeout == 5.0
@@ -70,8 +70,8 @@ def test_send():
 def test_default_salt():
     fake = Fake()
     solapi = Solapi(Keys(KEY, SECRET, SENDER, (TO,)), post=fake, clock=lambda: NOW)
-    solapi.send(TO, "a")
-    solapi.send(TO, "b")
+    solapi.outbox(TO, "a")
+    solapi.outbox(TO, "b")
     salts = [h["Authorization"].split("salt=")[1].split(",")[0] for _, h, _, _ in fake.calls]
     assert salts[0] != salts[1] and all(len(s) == 32 for s in salts)
 
@@ -81,7 +81,7 @@ def test_default_salt():
 def test_not_allowed(to):
     solapi, fake = sender()
     with pytest.raises(Refusal) as caught:
-        solapi.send(to, "본문")
+        solapi.outbox(to, "본문")
     assert fake.calls == []
     assert str(caught.value) == "허용 번호가 아니다"
     clean(str(caught.value))
@@ -92,7 +92,7 @@ def test_not_allowed(to):
 def test_bad_body(body):
     solapi, fake = sender()
     with pytest.raises(Refusal):
-        solapi.send(TO, body)
+        solapi.outbox(TO, body)
     assert fake.calls == []
 
 
@@ -101,7 +101,7 @@ def test_bad_body(body):
 def test_status(status):
     solapi, fake = sender(status=status)
     with pytest.raises(Refusal) as caught:
-        solapi.send(TO, "본문")
+        solapi.outbox(TO, "본문")
     assert str(caught.value) == f"HTTP {status}"
     assert len(fake.calls) == 1
     clean(str(caught.value))
@@ -111,7 +111,7 @@ def test_status(status):
 @pytest.mark.parametrize("status", [200, 201, 299])
 def test_success(status):
     solapi, fake = sender(status=status)
-    solapi.send(TO, "본문")
+    solapi.outbox(TO, "본문")
     assert len(fake.calls) == 1
 
 
@@ -120,7 +120,7 @@ def test_error():
     error = TimeoutError(f"boom {KEY} {SECRET} {TO}")
     solapi, fake = sender(error=error)
     with pytest.raises(Refusal) as caught:
-        solapi.send(TO, "본문")
+        solapi.outbox(TO, "본문")
     assert str(caught.value) == "TimeoutError"
     assert caught.value.__cause__ is None and caught.value.__suppress_context__
     assert len(fake.calls) == 1

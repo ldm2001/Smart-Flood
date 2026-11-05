@@ -32,7 +32,7 @@ export function RainPanel({ snapshot, rain, gate, onSend, draft, onDraft }: Prop
     ["rain-mm", check],
   ]);
   // 직접 입력을 보냄. 반영되면 칸을 비움
-  const submit = async () => {
+  const submission = async () => {
     if (!check.ok) return;
     if (await onSend(shower(check.value))) onDraft("");
   };
@@ -93,7 +93,7 @@ export function RainPanel({ snapshot, rain, gate, onSend, draft, onDraft }: Prop
           onChange={(event) => onDraft(event.target.value)}
           className={FIELD}
         />
-        <Trigger id="ops-rain" gate={apply} why={links.rain} onPress={() => void submit()}>
+        <Trigger id="ops-rain" gate={apply} why={links.rain} onPress={() => void submission()}>
           적용
         </Trigger>
       </div>

@@ -134,7 +134,7 @@ export function Chart({ samples, predictions, thresholds }: Props) {
                 data-zone={id}
                 data-end=""
                 aria-hidden="true"
-                className="absolute -translate-x-full -translate-y-1/2 rounded-md border border-(--zone) bg-raised px-1 leading-tight font-medium text-ink"
+                className="absolute -translate-x-full -translate-y-1/2 rounded-md border border-(--zone) bg-raised px-1 font-medium text-ink"
                 style={{ top: percent(endY[id], H), left: `calc(${percent(nowX, W)} - ${0.25 + endColumn[id] * END_STEP_REM}rem)` }}
               >
                 {id}
@@ -173,7 +173,7 @@ export function Chart({ samples, predictions, thresholds }: Props) {
             {id} {ZONES[id].name}
           </li>
         ))}
-        <li className="text-muted">실선 지난 수위 · 점선 예측 · 가는 점선 한계</li>
+        <li className="leading-normal text-muted">실선 지난 수위 · 점선 예측 · 가는 점선 한계</li>
         {// 단위 설명
         }
         <li className="text-muted">단위 mm</li>

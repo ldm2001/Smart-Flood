@@ -28,7 +28,7 @@ function state(dataSource: Input = "sim", rain: Partial<Snapshot["rain"]> = {}):
 }
 
 // online 판정으로 그린 강우 칸
-function draw(snapshot: Snapshot | null, draft = "", rain: Rainfall | null = RAIN) {
+function markup(snapshot: Snapshot | null, draft = "", rain: Rainfall | null = RAIN) {
   const gate: Gate = gates("online", T, snapshot, null).rain;
   return renderToStaticMarkup(
     <RainPanel
@@ -44,7 +44,7 @@ function draw(snapshot: Snapshot | null, draft = "", rain: Rainfall | null = RAI
 
 describe("RainPanel", () => {
   it("shows dashes and points the controls at the halt line before the first answer", () => {
-    const html = draw(null);
+    const html = markup(null);
     expect(content(html)).toContain("단계 — 세기 — 상태 —");
     for (const id of [...PRESETS, "ops-rain"]) {
       expect(button(html, id)).toContain('aria-disabled="true" aria-describedby="ops-halt"');
@@ -52,16 +52,16 @@ describe("RainPanel", () => {
   });
 
   it("shows the server rain with its stage, rate and state icon", () => {
-    const html = draw(state());
+    const html = markup(state());
     expect(content(html)).toContain("단계 보통 강우 세기 60 mm/h 상태 [wave] 켜짐");
     expect(content(html)).toContain("약한 강우 30 mm/h 보통 강우 60 mm/h 강한 강우 90 mm/h");
-    const off = draw(state("sim", { state: "OFF", mmPerHour: 0 }));
+    const off = markup(state("sim", { state: "OFF", mmPerHour: 0 }));
     expect(content(off)).toContain("세기 0 mm/h 상태 [pause] 꺼짐");
   });
 
   // 강우 설정이 없으면 단계 값은 줄표이고 입력 칸은 막히며 이유가 보이는지 검사
   it("blocks the typed rate without the server rain setting", () => {
-    const html = draw(state(), "", null);
+    const html = markup(state(), "", null);
     expect(content(html)).toContain("약한 강우 — mm/h 보통 강우 — mm/h 강한 강우 — mm/h");
     expect(field(html)).toContain('disabled=""');
     expect(field(html)).toContain('aria-describedby="ops-why-rain"');
@@ -72,7 +72,7 @@ describe("RainPanel", () => {
   });
 
   it("gives the range for an empty field without marking it invalid", () => {
-    const html = draw(state());
+    const html = markup(state());
     expect(field(html)).toContain('min="0" max="150" step="any"');
     expect(field(html)).not.toContain('disabled=""');
     expect(field(html)).not.toContain('aria-invalid="');
@@ -81,7 +81,7 @@ describe("RainPanel", () => {
   });
 
   it("marks a rate over the limit invalid and keeps apply off", () => {
-    const html = draw(state(), "200");
+    const html = markup(state(), "200");
     expect(field(html)).toContain('value="200"');
     expect(field(html)).toContain('aria-invalid="true" aria-describedby="ops-why-rain"');
     expect(button(html, "ops-rain")).toContain(
@@ -91,7 +91,7 @@ describe("RainPanel", () => {
   });
 
   it("turns apply on for a rate in range and lists no reason", () => {
-    const html = draw(state(), "75");
+    const html = markup(state(), "75");
     expect(button(html, "ops-rain")).not.toContain('aria-disabled="');
     expect(field(html)).not.toContain("aria-");
     expect(html).not.toContain("<ul");
@@ -99,7 +99,7 @@ describe("RainPanel", () => {
 
   // 재생 중 단계 셋과 적용이 한 이유 줄을 같이 가리키고 글은 한 번인지 검사
   it("shares one reason line among the presets and apply during a replay", () => {
-    const html = draw(state("replay"));
+    const html = markup(state("replay"));
     const text = "재생 중에는 강우를 바꿀 수 없습니다. 시뮬레이션으로 돌아간 뒤 합니다";
     for (const id of [...PRESETS, "ops-rain"]) {
       expect(button(html, id)).toContain(
@@ -111,13 +111,13 @@ describe("RainPanel", () => {
   });
 
   it("marks only the preset that matches the server stage", () => {
-    const html = draw(state("sim", { intensity: "강한 강우", mmPerHour: 90 }));
+    const html = markup(state("sim", { intensity: "강한 강우", mmPerHour: 90 }));
     expect(button(html, "ops-rain-heavy")).toContain('aria-current="true"');
     for (const id of ["ops-rain-light", "ops-rain-medium", "ops-rain"]) {
       expect(button(html, id)).not.toContain('aria-current="');
     }
     for (const intensity of ["직접 입력 75 mm/h", "강우 없음"]) {
-      expect(draw(state("sim", { intensity }))).not.toContain('aria-current="');
+      expect(markup(state("sim", { intensity }))).not.toContain('aria-current="');
     }
   });
 });

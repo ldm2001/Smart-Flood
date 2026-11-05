@@ -501,7 +501,7 @@ export function halt(link: Linkage, receivedAt: number | null): string | null {
   return link === "online" ? null : stoppage(link, receivedAt);
 }
 
-// 제어마다 켜짐과 이유. 연결·재생·회차 상태 차례로 먼저 맞는 규칙이 이기고, 보내는 중이면 켜진 제어를 끔
+// 제어마다 켜짐과 이유. 연결·재생·회차 차례로 먼저 맞는 규칙이 이김. 보내는 중이면 켜진 제어 끔
 export function gates(
   link: Linkage,
   receivedAt: number | null,
@@ -747,11 +747,11 @@ export function amendment(
   const text = (id: Zone) => draft[id] ?? String(saved[id]);
   const texts = { A: text("A"), B: text("B"), C: text("C") };
   // 이유 글 앞에 구역 이름을 붙인 검사
-  const check = (id: Zone): Check => {
+  const inspection = (id: Zone): Check => {
     const result = brim(texts[id]);
     return result.ok ? result : { ok: false, reason: `${id} 구역 · ${result.reason}` };
   };
-  const checks = { A: check("A"), B: check("B"), C: check("C") };
+  const checks = { A: inspection("A"), B: inspection("B"), C: inspection("C") };
   const values: Thresholds = { ...saved };
   for (const id of ZONE_IDS) {
     const result = checks[id];

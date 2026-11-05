@@ -27,7 +27,7 @@ def stamp(value: str) -> str:
         raise ValueError(f"ISO 8601 시각이 아니다: {value!r}") from error
     if offset != KST_OFFSET:  # +09:00 이 아니면
         raise ValueError(f"시각은 +09:00 이어야 한다: {value!r}")
-    return value  # 통과한 값을 그대로 반환
+    return value
 
 
 # JSON 숫자만 받는 실수 타입을 만듦(문자열·불리언 거부)
@@ -162,7 +162,7 @@ class Board(Response):
     predictionMeta: Meta | None = None  # 추가 필드: 예측 메타 정보
     notifier: Alarm | None = None  # 추가 필드: 알림 방식·무장(서버 응답에는 늘 있음)
 
-    @classmethod  # 클래스 메서드(인스턴스 없이 부름)
+    @classmethod
     # 서비스 스냅샷을 API 응답으로 변환(단위는 mm·L·L/min)
     def snapshot(cls, s: Snapshot) -> Board:
         p = s.prediction
@@ -296,6 +296,8 @@ class Message(Intake):
     tMs: Annotated[int, Field(ge=0)]  # 장치 시각(ms, 0 이상)
     readings: Readings  # 읽은 값
     sensorStatus: Status  # 센서 상태
+    # 플로트 스위치(normal 물 있음, low 물 부족). 선택 필드라 없으면 기록 원문에서도 뺌
+    floatSwitch: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 # 장치 메시지의 영수증(POST /api/ingest 응답)
@@ -314,7 +316,7 @@ def encoding(value):
         return {key: encoding(item) for key, item in value.items()}
     if isinstance(value, list):
         return [encoding(item) for item in value]
-    return value  # 그 밖의 값은 그대로 반환
+    return value
 
 
 LOG_VERSION = 1  # 기록 형식 버전. 줄 하나가 JSON 객체 하나이고 단위는 API 와 같음(7장)

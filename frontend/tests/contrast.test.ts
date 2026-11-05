@@ -5,9 +5,9 @@ import { describe, expect, it } from "vitest";
 type Rgb = [number, number, number];
 
 // 저장소 안 파일을 글자로 읽음
-const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
-const tokens = read("../src/styles/tokens.css").replace(/\/\*[\s\S]*?\*\//g, "");  // 주석 뺌
-const globals = read("../src/app/globals.css").replace(/\/\*[\s\S]*?\*\//g, "");
+const source = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+const tokens = source("../src/styles/tokens.css").replace(/\/\*[\s\S]*?\*\//g, "");  // 주석 뺌
+const globals = source("../src/app/globals.css").replace(/\/\*[\s\S]*?\*\//g, "");
 const root = tokens.match(/:root\s*\{([^}]*)\}/)?.[1] ?? "";
 const theme = tokens.match(/@theme\s+inline\s*\{([^}]*)\}/)?.[1] ?? "";
 const entries = [...root.matchAll(/--([a-z-]+):\s*([^;]+);/g)];  // :root 의 --이름: 값; 짝
@@ -63,11 +63,11 @@ function mix(front: Rgb, back: Rgb): Rgb {
   const l = (light + 0.3963377774 * a + 0.2158037573 * b) ** 3;
   const m = (light - 0.1055613458 * a - 0.0638541728 * b) ** 3;
   const s = (light - 0.0894841775 * a - 1.291485548 * b) ** 3;
-  const clamp = (v: number) => Math.min(1, Math.max(0, v));
+  const gamut = (v: number) => Math.min(1, Math.max(0, v));
   return [
-    clamp(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
-    clamp(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
-    clamp(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
+    gamut(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+    gamut(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+    gamut(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
   ];
 }
 

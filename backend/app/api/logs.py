@@ -66,7 +66,7 @@ def access(experiment_log: Journal, experiment_id: str) -> Iterator[dict]:
         raise miss(experiment_id)  # 404 로 처리
     try:
         with shield():  # 입출력 오류는 503 으로
-            return experiment_log.records(experiment_id)  # 기록 줄을 하나씩 내는 값을 반환
+            return experiment_log.records(experiment_id)
     except Absence:
         raise miss(experiment_id) from None  # 404 로 처리
 

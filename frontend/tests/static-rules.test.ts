@@ -100,7 +100,8 @@ function routes(dirs: string[], files: Entry[]): string[] {
   return problems;
 }
 
-const DIALOG_CALL = /\b(?:alert|confirm|prompt)\s*\(/g;  // 대화상자 규칙: 브라우저 기본 대화상자 호출 모양
+// 대화상자 규칙: 브라우저 기본 대화상자 호출 모양
+const DIALOG_CALL = /\b(?:alert|confirm|prompt)\s*\(/g;
 
 // 브라우저 기본 대화상자를 부르는 곳을 모으는 함수. 확인은 화면 안 확인 줄로 받음
 const dialogs = (text: string) => text.match(DIALOG_CALL) ?? [];

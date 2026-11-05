@@ -110,6 +110,7 @@ export const DEVICE_NAMES: Record<Device, string> = {  // 장치 표시 이름
 export const DEVICE_LABELS = {  // 장치 값 표시 글. 목록에 없는 값은 그대로 보임
   online: "정상",
   normal: "정상",
+  low: "물 부족",  // 실측 플로트의 물 부족. 보드가 펌프를 멈춤
   offline: "끊김",
   unknown: "미상",
 } as const;
@@ -151,7 +152,8 @@ export const CONTROL_NAMES: Record<Control, string> = {  // 제어 단추와 결
   replay: "재생 시작",
 };
 
-export const REPLAY_NAMES = { stop: "재생 멈춤", sim: "시뮬레이션으로 돌아가기" } as const;  // 재생 중 이름
+// 재생 중 이름
+export const REPLAY_NAMES = { stop: "재생 멈춤", sim: "시뮬레이션으로 돌아가기" } as const;
 
 export const PRESET_LABELS: Record<Preset, string> = {  // 서버 강우 단계 이름과 같음
   light: "약한 강우",
@@ -164,7 +166,8 @@ export const RAIN_ICONS = { ON: "wave", OFF: "pause" } as const;  // 강우 켜�
 // 결과 줄 아이콘
 export const OUTCOME_ICONS = { ok: "check", fail: "error", unsure: "triangle" } as const;
 
-export const BLOCKAGE_TONES: Record<Blockage, string> = {  // 막힘 칩의 테두리와 글자 색. 막힘 없으면 칩 기본색
+// 막힘 칩의 테두리와 글자 색. 막힘 없으면 칩 기본색
+export const BLOCKAGE_TONES: Record<Blockage, string> = {
   none: "border-line",
   partial: "border-amber text-amber",
   full: "border-(--red) text-(--red)",

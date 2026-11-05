@@ -44,8 +44,9 @@ export function Desk() {
   const switches = gates(link, receivedAt, snapshot, sending);  // 제어마다 켜짐
   if (open !== null && !switches[open].on) setOpen(null);  // 판정이 꺼진 확인 줄은 닫음
   // 제어 하나를 보냄. 반영되면 응답 상태를 캐시에 넣고 true
-  const send = async (request: Command) => {
-    if (sending !== null || !switches[request.control].on) return false;  // 두 번 누름과 꺼진 제어를 막음
+  const sender = async (request: Command) => {
+    // 두 번 누름과 꺼진 제어를 막음
+    if (sending !== null || !switches[request.control].on) return false;
     const replay = snapshot?.dataSource === "replay";  // 결과 글은 보낼 때 기준
     setSending(request.control);
     setOpen(null);
@@ -60,7 +61,7 @@ export function Desk() {
     const next = step(open, input);
     setOpen(next.open);
     // 재생은 기록 화면에서 보냄
-    if (next.send !== null && next.send !== "replay") void send(command(next.send));
+    if (next.send !== null && next.send !== "replay") void sender(command(next.send));
   };
   return (
     <Sheet
@@ -78,7 +79,7 @@ export function Desk() {
       sending={sending}
       delivery={delivery}
       onPress={press}
-      onSend={send}
+      onSend={sender}
     />
   );
 }
@@ -128,14 +129,14 @@ export function Sheet(props: Board) {
       </header>
 
       {props.halt !== null && (
-        <p id="ops-halt" className="flex items-center gap-2 font-medium">
+        <p id="ops-halt" className="flex items-center gap-2 leading-normal font-medium">
           <Glyph name="info" />
           {props.halt}
         </p>
       )}
       {// 결과 줄. 바뀐 글을 낭독기가 읽도록 비어도 자리를 둠
       }
-      <p id="ops-note" aria-live="polite" className="mt-1 flex min-h-7 items-center gap-2">
+      <p id="ops-note" aria-live="polite" className="mt-1 flex min-h-7 items-center gap-2 leading-normal">
         {props.sending !== null && (
           <>
             <Glyph name="dots" />

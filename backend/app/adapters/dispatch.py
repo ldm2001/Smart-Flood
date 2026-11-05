@@ -21,7 +21,7 @@ MODES = ("stub", "sms")  # 발송 방식
 
 # 문자 한 건을 보내는 쪽(Solapi 또는 시험용 가짜)
 class Sender(Protocol):
-    def send(self, to: str, body: str) -> None:
+    def outbox(self, to: str, body: str) -> None:
         ...
 
 
@@ -97,7 +97,7 @@ class Dispatch:
         return "무장 해제" if self.ready else "환경 변수 없음"
 
     # 무장·해제. 조건이 안 맞으면 켜지 않음(409 는 서비스가 냄)
-    def arm(self, on: bool) -> None:
+    def arming(self, on: bool) -> None:
         self.armed = bool(on) and self.mode == "sms" and self.ready
 
     # 단계 사건 하나. 오르는 전환의 문자 대상 단계만, (실험, 구역, 단계)마다 한 번
@@ -127,12 +127,12 @@ class Dispatch:
             if message.digits(number) not in self._keys.allowed:  # 보내기 시도 자체를 안 함
                 log.warning("SMS 차단 %s %s: 허용 번호가 아니다", experiment, message.mask(number))
                 continue
-            self._runner(partial(self.deliver, experiment, number, body))
+            self._runner(partial(self.delivery, experiment, number, body))
 
     # 문자 한 건(발송 스레드에서 돎). 실패는 로그만, 재시도 없음
-    def deliver(self, experiment: str, number: str, body: str) -> None:
+    def delivery(self, experiment: str, number: str, body: str) -> None:
         try:
-            self._sender.send(number, body)
+            self._sender.outbox(number, body)
         except Exception as error:  # 예외 종류만(글에 키·번호가 섞일 수 있음)
             name = type(error).__name__
             log.warning("SMS 실패 %s %s: %s", experiment, message.mask(number), name)
@@ -151,7 +151,7 @@ class Dispatch:
         body = message.trial(at)
         shown = message.mask(number)  # 가린 번호(뒤 4자리)
         try:
-            self._sender.send(number, body)
+            self._sender.outbox(number, body)
         except Exception as error:
             log.warning("SMS 실패(시험) %s: %s", shown, type(error).__name__)
             raise

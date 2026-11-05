@@ -19,14 +19,14 @@ const REV16 = {  // REV16 실측 입력의 장치 값
 };
 const NOTE =
   "가상·재생 입력에서는 장치 값이 늘 정상으로 나옵니다. 실측 입력에서는 마지막 메시지 뒤 " +
-  "5초 안의 장치만 정상이고, 한 번도 오지 않은 장치는 끊김, 플로트 스위치·비상정지는 " +
-  "메시지에 없어 미상으로 보입니다.";
+  "5초 안의 장치만 정상이고, 한 번도 오지 않은 장치는 끊김, 플로트 스위치는 보드가 보낸 " +
+  "정상·물 부족, 비상정지는 메시지에 없어 미상으로 보입니다.";
 const LOCK = '<span class="chip border border-line">출력 잠금</span>';
-const draw = (snapshot: Snapshot | null) => renderToStaticMarkup(<Devices snapshot={snapshot} />);
+const markup = (snapshot: Snapshot | null) => renderToStaticMarkup(<Devices snapshot={snapshot} />);
 
 describe("Devices", () => {
   it("shows healthy protection inputs for the simulation", () => {
-    const html = draw(SIM);
+    const html = markup(SIM);
     const text = content(html);
     for (const part of [
       "[check] 보호 입력 정상",
@@ -42,7 +42,7 @@ describe("Devices", () => {
   });
 
   it("asks for a check when live devices are offline or unknown", () => {
-    const html = draw({ ...SIM, dataSource: "live", devices: REV16 });
+    const html = markup({ ...SIM, dataSource: "live", devices: REV16 });
     const text = content(html);
     for (const part of [
       "[alert] 보호 상태 확인",
@@ -57,6 +57,15 @@ describe("Devices", () => {
     expect(html).toContain('<p class="text-lg font-medium text-amber">');
   });
 
+  it("marks a low live float switch as water shortage", () => {
+    const html = markup({ ...SIM, dataSource: "live", devices: { ...REV16, floatSwitch: "low" } });
+    const text = content(html);
+    expect(text).toContain("[alert] 보호 상태 확인");
+    expect(text).toContain("[alert] 플로트 스위치 · 물 부족");
+    expect(text).not.toContain("플로트 스위치 · low");
+    expect(html).toContain('<p class="text-lg font-medium text-amber">');
+  });
+
   it("colours the three input qualities", () => {
     const cases = [
       ["valid", "[check] 입력 품질 · 정상", "text-(--green)"],
@@ -64,7 +73,7 @@ describe("Devices", () => {
       ["invalid", "[alert] 입력 품질 · 사용 중지", "text-(--red)"],
     ] as const;
     for (const [quality, line, tone] of cases) {
-      const html = draw({ ...SIM, quality });
+      const html = markup({ ...SIM, quality });
       expect(content(html)).toContain(line);
       expect(html).toContain(`<p class="mt-3 ${tone}">`);
     }
@@ -72,14 +81,14 @@ describe("Devices", () => {
 
   it("shows unknown device values as they are", () => {
     const devices = { ...REV16, esp32_1: "tripped", floatSwitch: "constructor" };
-    const text = content(draw({ ...SIM, devices }));
+    const text = content(markup({ ...SIM, devices }));
     expect(text).toContain("[alert] ESP32 #1 · tripped");
     expect(text).toContain("[alert] 플로트 스위치 · constructor");
   });
 
   it("always shows the output lock and the two notes", () => {
     for (const snapshot of [SIM, null]) {
-      const html = draw(snapshot);
+      const html = markup(snapshot);
       const text = content(html);
       expect(html).toContain(LOCK);
       expect(text).toContain("제어 출력 출력 잠금");
@@ -89,7 +98,7 @@ describe("Devices", () => {
   });
 
   it("shows dashes while connecting", () => {
-    const html = draw(null);
+    const html = markup(null);
     expect(content(html)).toContain(
       "현장 장치 상태 — ESP32 #1 · — ESP32 #2 · — 플로트 스위치 · — 비상정지 · — 입력 품질 · —",
     );

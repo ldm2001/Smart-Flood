@@ -65,6 +65,7 @@ SIM_DEVICES = {
     "floatSwitch": "normal",  # 플로트 스위치: 정상
     "emergencyStop": "normal",  # 비상 정지: 정상
 }
+FLOAT_STATES = ("normal", "low")  # 플로트 스위치 값: 물 있음, 물 부족(4.3). 그 밖은 unknown
 
 
 # 값이 이 실험 구성에서 뜻이 없음(422, 위치 앞에 body)
@@ -152,6 +153,7 @@ class Experiment:
         self._offline_after_s = float(config["devices"]["offline_after_s"])  # 수신 끊김(초)
         self._invalid_after_s = float(config["correction"]["invalid_after_s"])  # 품질 invalid(초)
         self._seen: dict[str, float] = {}  # 장치 → 마지막 수신 시각(단조 초)
+        self._float: tuple[str | None, object] = (None, None)  # 마지막 메시지의 (장치, 플로트 값)
         self._absent: frozenset[str] = frozenset()  # 마지막 메시지에서 absent 였던 구역
         self.review()  # 계약대로 응답할 수 있는 구성인지 봄(아니면 기동에서 실패)
         self._config_hash = checksum(config)  # 설정 해시(회차마다 meta 줄에 구성을 그대로 적음)
@@ -178,7 +180,7 @@ class Experiment:
         if not 0.0 <= self._gain <= 1.0:
             raise ValueError(f"보정 이득은 0~1 이어야 한다: {self._gain}")
 
-    @property  # 속성처럼 읽음(조회)
+    @property
     # 최근 스냅샷. live 의 장치 상태는 읽는 때로 새로 봄(대기 중에는 tick 이 없음)
     def snapshot(self) -> Snapshot:
         snapshot = self._snapshot
@@ -702,11 +704,11 @@ class Experiment:
         return "stub", False
 
     # 실제 발송 무장·해제. 켤 때만 재생·mode·환경 변수를 보고 안 맞으면 409
-    def arm(self, on: bool) -> None:
+    def arming(self, on: bool) -> None:
         switch = self.notifier if isinstance(self.notifier, Switch) else None
         if not on:
             if switch is not None:
-                switch.arm(False)
+                switch.arming(False)
             return
         if self._replay is not None:
             raise Conflict("재생 중에는 실제 발송을 무장할 수 없다")
@@ -714,7 +716,7 @@ class Experiment:
             raise Conflict("notifier.mode 가 sms 가 아니라 무장할 수 없다")
         if not switch.ready:
             raise Conflict("발송 환경 변수가 없어 무장할 수 없다")
-        switch.arm(True)
+        switch.arming(True)
 
     # 시험 문자 한 건을 보내고 (가린 번호, 본문)을 돌려줌. 무장·횟수는 409, 발송 실패는 502
     def trial(self) -> tuple[str, str]:
@@ -736,20 +738,24 @@ class Experiment:
             known = ", ".join(self._allowed)  # 허용 장치 목록(글자)
             raise Fault(("deviceId",), f"모르는 장치: {device} (있는 것: {known})")  # 422
         self._seen[device] = self.clock.monotonic()
-        self._live.admit(message)
+        self._float = (device, message.get("floatSwitch"))  # 장치 상태에만 씀(수위·위험 판정 제외)
+        self._live.admission(message)
         if self._run_state != "running":
             self.renewal()  # 대기·정지 중에도 장치 상태를 새로 봄
 
     # 장치 상태. live 는 마지막 수신 뒤 offline_after_s 부터 offline, 그 밖은 시뮬레이션 값
+    # floatSwitch 는 마지막 메시지의 값. 그 장치가 offline 이거나 값이 없거나 낯설면 unknown
     def roster(self) -> dict[str, str]:
         if self._data_source != "live":
             return dict(SIM_DEVICES)
         now = self.clock.monotonic()
+        fresh = {d for d, t in self._seen.items() if now - t < self._offline_after_s}  # online
         devices = {}
         for device in ("esp32_1", "esp32_2"):  # 계약의 장치 키. 허용 목록에 없으면 offline
-            fresh = device in self._seen and now - self._seen[device] < self._offline_after_s
-            devices[device] = "online" if fresh else "offline"
-        return {**devices, "floatSwitch": "unknown", "emergencyStop": "unknown"}  # 메시지에 없음
+            devices[device] = "online" if device in fresh else "offline"
+        sender, value = self._float
+        switch = value if sender in fresh and value in FLOAT_STATES else "unknown"
+        return {**devices, "floatSwitch": switch, "emergencyStop": "unknown"}  # 비상 정지는 없음
 
     # 입력 품질. live 는 기대 센서(absent 가 아닌 A·B)의 마지막 유효 관측 나이로 판정
     def grade(
@@ -782,7 +788,7 @@ class Experiment:
         return f"빗물받이 {numeral(location)} {BLOCKAGE_LABELS[kind]}"
 
 
-@contextmanager  # with 문에서 쓰는 도구로 만듦
+@contextmanager
 # 기록 입출력 오류를 Outage 로 변환(기록 조회 API 도 씀)
 def shield() -> Iterator[None]:
     try:

@@ -108,7 +108,7 @@ const ROUTES: Record<Control, string> = {  // 제어마다 POST 주소
 export async function order(command: Command): Promise<Answer> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-  const fail = (fault: Fault): Answer => ({ ok: false, fault, at: wall() });  // 실패와 그 시각
+  const failure = (fault: Fault): Answer => ({ ok: false, fault, at: wall() });  // 실패와 그 시각
   try {
     let response: Response;
     try {
@@ -120,23 +120,24 @@ export async function order(command: Command): Promise<Answer> {
         signal: controller.signal,
       });
     } catch {
-      return fail(controller.signal.aborted ? { kind: "timeout" } : { kind: "network" });
+      return failure(controller.signal.aborted ? { kind: "timeout" } : { kind: "network" });
     }
     let body: unknown = null;  // 본문을 못 읽으면 이유 없음으로 봄
     try {
       body = await response.json();
     } catch {
-      if (controller.signal.aborted) return fail({ kind: "timeout" });  // 본문을 읽다 시간이 다 됨
+      // 본문을 읽다 시간이 다 됨
+      if (controller.signal.aborted) return failure({ kind: "timeout" });
     }
     if (response.ok) {
       try {
         return { ok: true, receipt: { snapshot: contract(body), receivedAt: wall() } };
       } catch {
-        return fail({ kind: "format" });  // 200 인데 계약과 다름
+        return failure({ kind: "format" });  // 200 인데 계약과 다름
       }
     }
     const text = cause(body);  // 서버가 붙인 이유 글
-    return fail(
+    return failure(
       text === null
         ? { kind: "status", status: response.status }
         : { kind: "refused", status: response.status, text },

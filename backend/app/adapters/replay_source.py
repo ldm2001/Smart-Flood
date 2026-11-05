@@ -162,7 +162,7 @@ def plug(line: int, kind: str, value) -> tuple[str, str | None]:
     blockage_type, location = value.get("type"), value.get("location")
     if not (isinstance(blockage_type, str) and (location is None or isinstance(location, str))):
         raise defect(line, f"{kind} 의 blockage 를 읽을 수 없다: {value!r}")
-    return blockage_type, location  # (종류, 위치)를 반환
+    return blockage_type, location
 
 
 # obs 줄의 관측 원문. ingest 형식인지 보고 원문 그대로 반환
@@ -176,4 +176,4 @@ def payload(line: int, record: dict) -> dict:
         first = error.errors()[0]
         where = ".".join(str(part) for part in first["loc"])
         raise defect(line, f"관측 원문을 읽을 수 없다: {where} {first['msg']}") from None
-    return raw  # 원문 그대로 반환
+    return raw

@@ -35,7 +35,7 @@ def offline(monkeypatch):
     getaddrinfo, gethostbyname = socket.getaddrinfo, socket.gethostbyname
 
     # 연결 대상이 허용 범위인지 검사, 아니면 Offline
-    def check(sock, address):
+    def inspection(sock, address):
         if sock.family == getattr(socket, "AF_UNIX", None):
             return
         host = address[0] if isinstance(address, tuple) else address
@@ -43,13 +43,13 @@ def offline(monkeypatch):
             raise Offline(f"시험 중 바깥 연결 차단: {host}")
 
     # socket.connect 대역
-    def guarded(sock, address):
-        check(sock, address)
+    def connection(sock, address):
+        inspection(sock, address)
         return connect(sock, address)
 
     # socket.connect_ex 대역
-    def guarded_ex(sock, address):
-        check(sock, address)
+    def attempt(sock, address):
+        inspection(sock, address)
         return connect_ex(sock, address)
 
     # socket.getaddrinfo 대역
@@ -59,15 +59,15 @@ def offline(monkeypatch):
         return getaddrinfo(host, *args, **kwargs)
 
     # socket.gethostbyname 대역
-    def resolve(host):
+    def resolution(host):
         if not nearby(host):
             raise Offline(f"시험 중 이름 풀이 차단: {host}")
         return gethostbyname(host)
 
-    monkeypatch.setattr(socket.socket, "connect", guarded)
-    monkeypatch.setattr(socket.socket, "connect_ex", guarded_ex)
+    monkeypatch.setattr(socket.socket, "connect", connection)
+    monkeypatch.setattr(socket.socket, "connect_ex", attempt)
     monkeypatch.setattr(socket, "getaddrinfo", lookup)
-    monkeypatch.setattr(socket, "gethostbyname", resolve)
+    monkeypatch.setattr(socket, "gethostbyname", resolution)
 
 
 @pytest.fixture(autouse=True)

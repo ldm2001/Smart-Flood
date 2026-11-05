@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         print("보내지 않음: config.yaml 의 notifier.mode 가 sms 가 아님")
         return 2
     try:
-        Solapi(read).send(to, body)
+        Solapi(read).outbox(to, body)
     except Refusal as refusal:
         print(f"못 보냄: {refusal}")  # Refusal 글에는 키·번호가 없음
         return 1

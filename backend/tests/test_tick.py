@@ -116,7 +116,7 @@ class Tape:
     def inbox(self, elapsed_s, cond):
         messages = self.inner.inbox(elapsed_s, cond)
         self.history.append((elapsed_s, copy.deepcopy(messages)))
-        return messages  # 받은 메시지를 그대로 반환
+        return messages
 
 
 # 표시값 검사: 예측·변화율·배수는 모델, A·B 수위는 최근 유효 관측에서 옴

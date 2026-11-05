@@ -463,7 +463,7 @@ const T0 = Date.UTC(2026, 9, 22, 1, 0, 0);  // 회차 시작 시각(2026-10-22 1
 const CODES = { s: "safe", c: "caution", w: "warning", e: "evacuate" } as const;
 
 // 측정 기록 한 회("초 구역 이전 새 etaSec" 를 ; 로 이음)를 단계 사건 목록으로 바꾸는 도우미
-function run(text: string): StageEvent[] {
+function sequence(text: string): StageEvent[] {
   return text.split(";").map((line): StageEvent => {
     const [sec, zone, from, to, eta] = line.trim().split(" ");
     const stage = CODES[to as keyof typeof CODES];
@@ -482,18 +482,18 @@ function run(text: string): StageEvent[] {
   });
 }
 
-const R1 = run(  // 설계 1.3 의 기울기 측정 r1~r4
+const R1 = sequence(  // 설계 1.3 의 기울기 측정 r1~r4
   "67 A s e 0; 97 B s c 43; 98 B c w 28; 140 B w s -; 143 C s c 44; 147 C c w 30; 155 B s w 1",
 );
-const R2 = run(
+const R2 = sequence(
   "33 A s e 0; 50 B s w 5; 65 C s c 49; 66 B w s -; 67 B s w 1; 68 C c w 16; 77 B w e 0; " +
     "81 C w s -",
 );
-const R3 = run(
+const R3 = sequence(
   "63 A s e 0; 84 B s w 27; 122 B w s -; 132 C s c 41; 133 C c w 27; 135 B s w 1; 151 C w s -; " +
     "153 B w e 0",
 );
-const R4 = run("123 A s e 0; 173 B s w 14; 203 B w s -; 223 B s w 1");
+const R4 = sequence("123 A s e 0; 173 B s w 14; 203 B w s -; 223 B s w 1");
 const FAULT: LogEvent = {  // 계산 오류 사건(154초)
   type: "event",
   kind: "calc_error",
@@ -544,7 +544,7 @@ describe("scope", () => {
 
 describe("rows", () => {
   it("keeps the newest 30, newest first", () => {
-    const list = rows(run(Array.from({ length: 31 }, (_, i) => `${i} A s c 50`).join(";")));
+    const list = rows(sequence(Array.from({ length: 31 }, (_, i) => `${i} A s c 50`).join(";")));
     expect(list).toHaveLength(EVENT_ROWS);
     expect(list[0].elapsedSec).toBe(30);
     expect(list.at(-1)?.elapsedSec).toBe(1);
@@ -580,11 +580,12 @@ describe("milestones", () => {
   });
 
   it("has no request while the episode stays at caution", () => {
-    expect(seconds(milestones(run("5 C s c 50"), "C"))).toEqual([5, null, null]);
+    expect(seconds(milestones(sequence("5 C s c 50"), "C"))).toEqual([5, null, null]);
   });
 
   it("gives nothing without an episode", () => {
-    expect(seconds(milestones(run("10 A c s -"), "A"))).toEqual([null, null, null]);  // 정상 사건만
+    // 정상 사건만
+    expect(seconds(milestones(sequence("10 A c s -"), "A"))).toEqual([null, null, null]);
     expect(seconds(milestones([], "A"))).toEqual([null, null, null]);
     expect(seconds(milestones(R4, "C"))).toEqual([null, null, null]);
   });
@@ -612,6 +613,7 @@ describe("devices", () => {
     expect(condition("normal")).toEqual({ label: "정상", ok: true });
     expect(condition("offline")).toEqual({ label: "끊김", ok: false });
     expect(condition("unknown")).toEqual({ label: "미상", ok: false });
+    expect(condition("low")).toEqual({ label: "물 부족", ok: false });  // 실측 플로트 물 부족
     expect(condition("tripped")).toEqual({ label: "tripped", ok: false });
     expect(condition("constructor")).toEqual({ label: "constructor", ok: false });
   });
@@ -625,6 +627,7 @@ describe("devices", () => {
       emergencyStop: "unknown",
     };
     expect(readiness(rev16)).toBe(false);
+    expect(readiness({ ...LIVE.devices, floatSwitch: "low" })).toBe(false);  // 물 부족이면 확인
   });
 });
 
@@ -761,7 +764,8 @@ describe("gates", () => {
     expect(brief(gates("connecting", null, null, null))).toEqual(every(`halt:${HALT.connecting}`));
     expect(brief(gates("mock", null, null, null))).toEqual(every(`halt:${HALT.mock}`));
     expect(brief(gates("lost", T0, state, null))).toEqual(every(`halt:${HALT.lost}`));
-    expect(brief(gates("lost", T0, state, "start"))).toEqual(every(`halt:${HALT.lost}`));  // 끊김이 먼저
+    // 끊김이 먼저
+    expect(brief(gates("lost", T0, state, "start"))).toEqual(every(`halt:${HALT.lost}`));
     expect(brief(gates("online", T0, null, null))).toEqual(every(`halt:${HALT.connecting}`));
   });
 

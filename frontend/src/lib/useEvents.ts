@@ -25,9 +25,9 @@ export interface Events {
 export function useEvents(snapshot: Snapshot | null): Events {
   const [kept, setKept] = useState<Pack | null>(null);  // 마지막으로 받은 사건
   const key = topic(snapshot);
-  const read = useSWR(key, ([, id]: Topic) => logbook(id).then((list) => ({ id, list })), {
+  const response = useSWR(key, ([, id]: Topic) => logbook(id).then((list) => ({ id, list })), {
     ...EVENTS_SWR_OPTIONS,
     onSuccess: (pack: Pack) => setKept(pack),
   });
-  return { list: holding(key === null ? null : key[1], kept), failed: read.error !== undefined };
+  return { list: holding(key === null ? null : key[1], kept), failed: response.error !== undefined };
 }

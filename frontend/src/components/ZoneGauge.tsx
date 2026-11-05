@@ -44,7 +44,7 @@ export function Gauge({ zoneId, zone, prediction, thresholdMm, status }: Props) 
       <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
         {// 현재 수위 숫자(32px 큰 수치)
         }
-        <p className="text-figure leading-none font-medium tabular-nums">
+        <p className="text-figure font-medium tabular-nums">
           {zone ? figure(zone.levelMm, thresholdMm) : "—"}
           {// 단위 mm
           }
@@ -66,7 +66,7 @@ export function Gauge({ zoneId, zone, prediction, thresholdMm, status }: Props) 
         <span>한계 대비</span>
         {// 한계 대비 퍼센트(28px 큰 수치)
         }
-        <span className="text-key leading-none font-medium text-ink">
+        <span className="text-key font-medium text-ink">
           {// 퍼센트 값. 수위나 한계를 모르면 줄표
           }
           {zone && thresholdMm !== null ? share(zone.levelMm, thresholdMm) : "—"}
@@ -119,7 +119,7 @@ export function Gauge({ zoneId, zone, prediction, thresholdMm, status }: Props) 
           <>
             {// 남은 초 숫자(28px 큰 수치)와 띄어쓰기
             }
-            <span className="text-key leading-none tabular-nums">{eta.value}</span>{" "}
+            <span className="text-key tabular-nums">{eta.value}</span>{" "}
           </>
         )}
         {eta ? eta.rest : "—"}

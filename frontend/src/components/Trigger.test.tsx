@@ -7,7 +7,7 @@ const ON: Gate = { on: true };  // 켜진 판정
 const press = () => {};  // 누름(하는 일 없음)
 
 // 판정과 이유 줄 id 로 그린 시작 단추
-function draw(gate: Gate, why?: string, current?: boolean) {
+function markup(gate: Gate, why?: string, current?: boolean) {
   return renderToStaticMarkup(
     <Trigger id="ops-start" gate={gate} why={why} current={current} onPress={press}>
       시작
@@ -17,7 +17,7 @@ function draw(gate: Gate, why?: string, current?: boolean) {
 
 describe("Trigger", () => {
   it("is a plain button that takes presses while on", () => {
-    const html = draw(ON, "ops-why-start");
+    const html = markup(ON, "ops-why-start");
     expect(html).toMatch(/^<button type="button" id="ops-start" class="[^"]+">시작<\/button>$/);
     expect(html).not.toContain('aria-disabled="');
     expect(html).not.toContain('aria-describedby="');
@@ -34,7 +34,7 @@ describe("Trigger", () => {
     ] as const;
     for (const [cue, target] of cues) {
       const gate: Gate = { on: false, reason: "이유", cue };
-      const html = draw(gate, "ops-why-start");
+      const html = markup(gate, "ops-why-start");
       expect(html).toContain(`aria-disabled="true" aria-describedby="${target}"`);
       const element = Trigger({ id: "ops-start", gate, onPress: press, children: "" });
       expect(element.props.onClick).toBeUndefined();
@@ -42,9 +42,9 @@ describe("Trigger", () => {
   });
 
   it("marks only the current preset", () => {
-    expect(draw(ON, undefined, true)).toContain('aria-current="true"');
-    expect(draw(ON, undefined, false)).not.toContain('aria-current="');
-    expect(draw(ON)).not.toContain('aria-current="');
+    expect(markup(ON, undefined, true)).toContain('aria-current="true"');
+    expect(markup(ON, undefined, false)).not.toContain('aria-current="');
+    expect(markup(ON)).not.toContain('aria-current="');
   });
 });
 

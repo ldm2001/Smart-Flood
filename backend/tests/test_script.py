@@ -8,12 +8,12 @@ SENDER = "010" + "0000" + "0000"  # 가짜 발신번호
 ENV = {"SOLAPI_API_KEY": "key", "SOLAPI_API_SECRET": "secret", "SOLAPI_SENDER": SENDER}  # 가짜 값
 
 
-# Solapi 대신. send(to, body) 의 번호만 모음
+# Solapi 대신. outbox(to, body) 의 번호만 모음
 class Phone:
     def __init__(self, sent: list[str]) -> None:
         self.sent = sent
 
-    def send(self, to: str, body: str) -> None:
+    def outbox(self, to: str, body: str) -> None:
         self.sent.append(to)
 
 

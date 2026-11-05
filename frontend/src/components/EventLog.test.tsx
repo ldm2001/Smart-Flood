@@ -36,12 +36,12 @@ function caution(e: number, message = `A 구역 주의 (이전 정상, 한계까
   };
 }
 
-const draw = (log: Events | null) => renderToStaticMarkup(<Journal log={log} />);
+const markup = (log: Events | null) => renderToStaticMarkup(<Journal log={log} />);
 
 describe("Journal", () => {
   it("shows the newest 30 of 31 events first", () => {
     const list = Array.from({ length: 31 }, (_, i) => caution(i + 1));
-    const html = draw({ list, failed: false });
+    const html = markup({ list, failed: false });
     const text = content(html);
     expect(html.match(/<li/g)).toHaveLength(30);
     expect(text.indexOf("10:00:31")).toBeLessThan(text.indexOf("10:00:30"));
@@ -54,13 +54,13 @@ describe("Journal", () => {
   });
 
   it("marks a calculation error row", () => {
-    const text = content(draw({ list: [caution(1), FAULT], failed: false }));
+    const text = content(markup({ list: [caution(1), FAULT], failed: false }));
     expect(text).toContain("10:02:34 [error] 계산 오류 Underflow: A 저장량이 -0.001 m³ 다");
     expect(text.indexOf("10:02:34")).toBeLessThan(text.indexOf("10:00:01"));
   });
 
   it("keeps the rows it has under the failure line", () => {
-    const html = draw({ list: [caution(1)], failed: true });
+    const html = markup({ list: [caution(1)], failed: true });
     const text = content(html);
     expect(html.match(/<li/g)).toHaveLength(1);
     expect(text.indexOf(FAILURE)).toBeLessThan(text.indexOf("10:00:01"));
@@ -68,25 +68,25 @@ describe("Journal", () => {
 
   it("announces the list politely", () => {
     const logs = [null, { list: null, failed: false }, { list: [caution(1)], failed: true }];
-    for (const log of logs) expect(draw(log)).toContain('<div aria-live="polite">');
+    for (const log of logs) expect(markup(log)).toContain('<div aria-live="polite">');
   });
 
   it("shows markup in a message as text", () => {
-    const html = draw({ list: [caution(1, "<b>A 구역</b>")], failed: false });
+    const html = markup({ list: [caution(1, "<b>A 구역</b>")], failed: false });
     expect(html).toContain("&lt;b&gt;A 구역&lt;/b&gt;");
     expect(html).not.toContain("<b>");
   });
 
   it("shows the waiting, loading, failed and empty states", () => {
-    expect(content(draw(null))).toContain("이벤트 기록 —");
-    expect(content(draw({ list: null, failed: false }))).toContain("이벤트를 읽는 중입니다");
-    const failed = content(draw({ list: null, failed: true }));
+    expect(content(markup(null))).toContain("이벤트 기록 —");
+    expect(content(markup({ list: null, failed: false }))).toContain("이벤트를 읽는 중입니다");
+    const failed = content(markup({ list: null, failed: true }));
     expect(failed).toContain(FAILURE);
     expect(failed).not.toContain("읽는 중");
-    expect(content(draw({ list: [], failed: false }))).toContain("표시할 이벤트가 없습니다");
-    const empty = content(draw({ list: [], failed: true }));
+    expect(content(markup({ list: [], failed: false }))).toContain("표시할 이벤트가 없습니다");
+    const empty = content(markup({ list: [], failed: true }));
     expect(empty).toContain(FAILURE);
     expect(empty).toContain("표시할 이벤트가 없습니다");
-    expect(content(draw({ list: [], failed: false }))).not.toContain("!");
+    expect(content(markup({ list: [], failed: false }))).not.toContain("!");
   });
 });

@@ -110,7 +110,7 @@ def footage(client, clock, log_id: str, *, max_ticks: int = 1000) -> list[bytes]
 
 # 바이트마다 SHA-256 해시를 만드는 함수
 def digests(bodies: list[bytes]) -> list[str]:
-    return [hashlib.sha256(body).hexdigest() for body in bodies]  # 해시 16진수 문자열 목록을 반환
+    return [hashlib.sha256(body).hexdigest() for body in bodies]
 
 
 # 받은 것의 앞 절반만 쓰고 디스크가 찼다고 알리는 파일 대역

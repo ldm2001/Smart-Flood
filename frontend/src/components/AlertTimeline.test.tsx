@@ -40,11 +40,11 @@ const R3: StageEvent[] = [  // 설계 1.3 의 기울기 측정 r3
   shift(151, "C", "warning", "safe", null),
   shift(153, "B", "warning", "evacuate", 0),
 ];
-const draw = (log: Events | null) => content(renderToStaticMarkup(<Timeline log={log} />));
+const markup = (log: Events | null) => content(renderToStaticMarkup(<Timeline log={log} />));
 
 describe("Timeline", () => {
   it("shows the judgement, request, arrival and lead of each zone", () => {
-    const text = draw({ list: R3, failed: false });
+    const text = markup({ list: R3, failed: false });
     for (const part of [
       "A 낮은 상가 도로 위험 판단 10:01:03 · [waves] 침수(경보) 문자 요청(SMS 예정) " +
         "10:01:03 · 기록만, 실제 발송 차단 실제 도달(경보) 10:01:03 선행 시간 0초",
@@ -65,7 +65,7 @@ describe("Timeline", () => {
   });
 
   it("shows dashes for a zone without a run", () => {
-    const text = draw({ list: R3.filter((event) => event.zone === "A"), failed: false });
+    const text = markup({ list: R3.filter((event) => event.zone === "A"), failed: false });
     expect(text).toContain(
       "B 주택 골목 위험 판단 — 문자 요청(SMS 예정) — 실제 도달(경보) — 선행 시간 —",
     );
@@ -73,7 +73,7 @@ describe("Timeline", () => {
   });
 
   it("keeps the rows it has under the failure line", () => {
-    const text = draw({ list: R3, failed: true });
+    const text = markup({ list: R3, failed: true });
     expect(text).toContain(FAILURE);
     expect(text).toContain("선행 시간 18초");
     expect(text.indexOf(FAILURE)).toBeLessThan(text.indexOf("A 낮은 상가 도로"));
@@ -81,7 +81,7 @@ describe("Timeline", () => {
 
   it("keeps the layout with dashes before the events arrive", () => {
     for (const log of [null, { list: null, failed: false }]) {
-      const text = draw(log);
+      const text = markup(log);
       expect(text.match(/—/g)).toHaveLength(12);
       expect(text.match(/선행 시간/g)).toHaveLength(3);
       expect(text.match(PHONE)).toHaveLength(1);

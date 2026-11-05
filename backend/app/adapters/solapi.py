@@ -18,8 +18,8 @@ STAMP = "%Y-%m-%dT%H:%M:%SZ"  # 서명 시각 형식(ISO 8601 UTC, 문서 예시
 Post = Callable[[str, dict[str, str], bytes, float], int]  # (주소, 머리글, 본문, 제한 초) → 상태
 
 
-# SOLAPI 접속 정보. 값이 repr·로그에 안 보이게 모든 필드 repr=False. 번호는 숫자만
 @dataclass(frozen=True)
+# SOLAPI 접속 정보. 값이 repr·로그에 안 보이게 모든 필드 repr=False. 번호는 숫자만
 class Keys:
     key: str = field(repr=False)
     secret: str = field(repr=False)
@@ -86,7 +86,7 @@ class Solapi:
         self.salt = salt or nonce
 
     # 한 건 발송. 허용 번호가 아니거나, 길거나, 실패하면 Refusal
-    def send(self, to: str, body: str) -> None:
+    def outbox(self, to: str, body: str) -> None:
         number = digits(to)
         if number not in self.keys.allowed:  # HTTP 호출 전에 거름
             raise Refusal("허용 번호가 아니다")

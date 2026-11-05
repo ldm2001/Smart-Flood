@@ -96,7 +96,7 @@ function Desk({ id }: { id: string | null }) {
   const gate = pass(own, rerun(snapshot, chosen ?? ""));
   if (open !== null && !gate.on) setOpen(null);  // 판정이 꺼진 확인 줄은 닫음
   // 재생 시작을 보냄. 반영되면 응답 상태를 캐시에 넣음
-  const send = async (request: Command) => {
+  const sender = async (request: Command) => {
     if (sending !== null || !gate.on) return;  // 두 번 누름과 꺼진 제어를 막음
     const replay = snapshot?.dataSource === "replay";  // 결과 글은 보낼 때 기준
     setSending(request.control);
@@ -110,7 +110,7 @@ function Desk({ id }: { id: string | null }) {
   const press = (input: Press) => {
     const next = step(open, input);
     setOpen(next.open);
-    if (next.send === "replay" && chosen !== null) void send(playback(chosen));
+    if (next.send === "replay" && chosen !== null) void sender(playback(chosen));
   };
   return (
     <Shelf
@@ -180,7 +180,7 @@ export function Shelf(props: Stack) {
       </header>
 
       {props.halt !== null && (
-        <p id="ops-halt" className="flex items-center gap-2 font-medium">
+        <p id="ops-halt" className="flex items-center gap-2 leading-normal font-medium">
           <Glyph name="info" />
           {props.halt}
         </p>
@@ -190,7 +190,7 @@ export function Shelf(props: Stack) {
       <p
         id="ops-note"
         aria-live="polite"
-        className="mt-1 flex min-h-7 flex-wrap items-center gap-2"
+        className="mt-1 flex min-h-7 flex-wrap items-center gap-2 leading-normal"
       >
         {props.sending !== null && (
           <>
@@ -262,7 +262,7 @@ function Detail(props: Stack) {
     return (
       <section aria-label="기록 상세" className="panel p-5">
         <h2 className="mb-4 text-lg font-medium">기록 상세</h2>
-        <p className="text-muted">목록에서 기록을 고르면 비교 표와 재생 단추가 나옵니다.</p>
+        <p className="leading-normal text-muted">목록에서 기록을 고르면 비교 표와 재생 단추가 나옵니다.</p>
       </section>
     );
   }

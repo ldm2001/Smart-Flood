@@ -17,7 +17,7 @@ class Live:
         self._queue.clear()
 
     # 장치가 보낸 메시지를 받아 둠
-    def admit(self, message: dict) -> None:
+    def admission(self, message: dict) -> None:
         self._queue.append(message)
 
     # 지난 tick 뒤에 받은 메시지를 받은 순서대로 모두 내보냄

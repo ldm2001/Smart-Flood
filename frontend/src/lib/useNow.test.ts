@@ -29,7 +29,7 @@ describe("useNow store", () => {
   it("reads the clock on the first subscribe and then once per second", async () => {
     const { reading, subscription } = await instance();
     const listener = vi.fn();
-    const unsubscribe = subscription(listener);
+    const cleanup = subscription(listener);
     expect(reading()).toBe(T0);
 
     vi.advanceTimersByTime(999);  // 0.999초를 보냄
@@ -39,16 +39,16 @@ describe("useNow store", () => {
     vi.advanceTimersByTime(1);  // 1밀리초 더 보냄(합계 1초)
     expect(listener).toHaveBeenCalledTimes(1);
     expect(reading()).toBe(T0 + 1000);
-    unsubscribe();
+    cleanup();
   });
 
   it("returns the same value between ticks", async () => {
     const { reading, subscription } = await instance();
-    const unsubscribe = subscription(() => {});
+    const cleanup = subscription(() => {});
     vi.setSystemTime(T0 + 400);  // 시계를 0.4초 보냄. 틱 전에는 값이 그대로
     expect(reading()).toBe(T0);
     expect(reading()).toBe(reading());
-    unsubscribe();
+    cleanup();
   });
 
   it("shares one interval and clears it after the last subscriber leaves", async () => {
@@ -75,9 +75,9 @@ describe("useNow store", () => {
 
   it("forgets the time after the last subscriber leaves, so a remount never paints an old time", async () => {
     const { reading, subscription } = await instance();
-    const unsubscribe = subscription(() => {});
+    const cleanup = subscription(() => {});
     expect(reading()).toBe(T0);
-    unsubscribe();
+    cleanup();
     vi.setSystemTime(T0 + 60_000);  // 화면을 떠나 있던 1분을 보냄
     expect(reading()).toBeNull();
   });
@@ -87,9 +87,9 @@ describe("useNow store", () => {
     const { reading, subscription } = await instance();
     subscription(() => {})();
     vi.setSystemTime(T0 + 60_000);  // 1분을 보냄
-    const unsubscribe = subscription(() => {});
+    const cleanup = subscription(() => {});
     expect(reading()).toBe(T0 + 60_000);
-    unsubscribe();
+    cleanup();
   });
 
   it("gives the wall clock to code outside render, like a poll's receive time", async () => {

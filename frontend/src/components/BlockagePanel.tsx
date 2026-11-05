@@ -5,7 +5,8 @@ import { blockageTypeSchema, type Blockage, type Command, type Snapshot } from "
 import { Glyph } from "./Glyph";
 import { Reasons, Trigger } from "./Trigger";
 
-const CHOICE = "inline-flex h-10 items-center gap-2 rounded-lg border border-line px-3";  // 라디오 한 칸
+// 라디오 한 칸
+const CHOICE = "inline-flex h-10 items-center gap-2 rounded-lg border border-line px-3";
 
 // 막힘 칸이 받는 값
 interface Props {
@@ -35,7 +36,7 @@ export function BlockagePanel({ snapshot, gate, onSend, kind, inlet, onKind, onI
   const apply = pass(gate, check);  // 적용 단추의 판정
   const { lines, links } = reasons([["blockage", apply]]);
   // 고른 막힘을 보냄. 반영되면 고른 값을 비워 서버 값을 따름
-  const submit = async () => {
+  const submission = async () => {
     if (!check.ok) return;
     if (await onSend(check.value)) {
       onKind(null);
@@ -95,7 +96,7 @@ export function BlockagePanel({ snapshot, gate, onSend, kind, inlet, onKind, onI
         </div>
       </fieldset>
       <div className="mt-4">
-        <Trigger id="ops-blockage" gate={apply} why={links.blockage} onPress={() => void submit()}>
+        <Trigger id="ops-blockage" gate={apply} why={links.blockage} onPress={() => void submission()}>
           적용
         </Trigger>
       </div>

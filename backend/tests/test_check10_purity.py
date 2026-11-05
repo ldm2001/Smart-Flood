@@ -28,7 +28,7 @@ BANNED_METHOD_CALLS = {"now", "utcnow", "today", "time_ns", "perf_counter", "mon
 # from 가져오기가 가리키는 모듈의 전체 이름을 구하는 함수
 def target(node: ast.ImportFrom, package: str) -> str:
     if node.level == 0:  # 점 없는 절대 경로면
-        return node.module or ""  # 그 이름 그대로 반환
+        return node.module or ""
     parts = package.split(".")[: len(package.split(".")) - (node.level - 1)]
     return ".".join(parts + ([node.module] if node.module else []))
 

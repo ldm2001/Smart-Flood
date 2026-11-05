@@ -101,7 +101,7 @@ export function LimitPanel({ limits, saved, draft, onDraft }: Props) {
         </Trigger>
       </div>
       <Reasons lines={lines} />
-      <p className="mt-4 text-base text-muted">
+      <p className="mt-4 text-base leading-normal text-muted">
         가상 데이터용 값은 서버에 연결되지 않은 <span className="font-mono">/</span> 화면에만 쓰입니다.
       </p>
     </section>

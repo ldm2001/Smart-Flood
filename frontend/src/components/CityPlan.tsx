@@ -174,7 +174,7 @@ export function Plan({ snapshot, statuses, thresholds }: Props) {
           </p>
         </div>
       )}
-      <ul className="mt-3 space-y-1">
+      <ul className="mt-3 space-y-1 leading-normal">
         {INLETS.map((inlet) => {
           const kind = blocked(inlet.id);
           return (
@@ -192,7 +192,7 @@ export function Plan({ snapshot, statuses, thresholds }: Props) {
           );
         })}
       </ul>
-      <ul className="mt-3 space-y-1">
+      <ul className="mt-3 space-y-1 leading-normal">
         {ZONE_IDS.map((id) => {
           const zone = snapshot?.zones[id];
           const grade = statuses?.[id];
@@ -232,10 +232,10 @@ export function Plan({ snapshot, statuses, thresholds }: Props) {
         ))}
       </dl>
 
-      <p className="mt-4 text-base text-muted">
+      <p className="mt-4 text-base leading-normal text-muted">
         C 구역은 수위 센서가 없어 늘 모델로 추정합니다. A·B 도 최근 관측이 없는 동안은 추정값입니다.
       </p>
-      <p className="mt-1 text-base text-muted">
+      <p className="mt-1 text-base leading-normal text-muted">
         위험 단계는 서버가 판정합니다. 실측 중 센서가 있는 구역은 관측 수위와 최근 20초 상승 속도로,
         그 밖에는 보정된 모델 수위로 판정합니다.
       </p>
