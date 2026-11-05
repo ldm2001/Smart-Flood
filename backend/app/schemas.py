@@ -13,6 +13,8 @@ if TYPE_CHECKING:  # 타입 검사할 때만 읽음(순환 참조 방지)
 
 CONTRACT_HORIZONS_S = (10, 20, 30)  # predictions 의 키: 10·20·30 초
 M_TO_MM = 1000.0  # m → mm 변환 계수(단위 변환은 여기서만)
+LEVEL_LIMIT_MM = 500  # 수위 상한(mm). levelMm·predictions 의 계약 범위
+LEVEL_LIMIT_M = LEVEL_LIMIT_MM / M_TO_MM  # 같은 상한(m). 실측 추세 예측을 여기서 자름
 M3_TO_L = 1000.0  # m³ → L 변환 계수
 M3S_TO_L_PER_MIN = 60_000.0  # m³/s → L/min 변환 계수
 RATE_LIMIT_MM_S = 20.0  # 변화율(mm/s) 계약 범위 ±20. 넘는 모델 값은 응답에서 포화
@@ -41,7 +43,7 @@ def rate(value_m_per_s: float) -> float:
 
 
 KstTime = Annotated[str, AfterValidator(stamp)]
-Level = number(ge=0, le=500)  # 수위(mm) 0~500. 벗어나면 잘라 내지 않고 검증 실패
+Level = number(ge=0, le=LEVEL_LIMIT_MM)  # 수위(mm) 0~500. 벗어나면 잘라 내지 않고 검증 실패
 Elapsed = number(ge=0, le=864_000)  # 경과 시간(초) 0~864000
 NonNegative = number(ge=0)
 BlockageType = Literal["none", "partial", "full"]
@@ -298,6 +300,8 @@ class Message(Intake):
     sensorStatus: Status  # 센서 상태
     # 플로트 스위치(normal 물 있음, low 물 부족). 선택 필드라 없으면 기록 원문에서도 뺌
     floatSwitch: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    # 보드 회차가 열려 있는지(참·거짓만). 선택 필드라 없으면 기록 원문에서도 뺌
+    running: StrictBool | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 # 장치 메시지의 영수증(POST /api/ingest 응답)

@@ -8,8 +8,10 @@ from app.core.danger import (
     Watch,
     bulletin,
     countdown,
+    gauge,
     outlook,
     patrol,
+    rising,
     shifts,
     slope,
     verdict,
@@ -22,6 +24,12 @@ BAD_RULE_CONFIGS = {  # 이름 → 설정을 망가뜨리는 함수. 전부 시�
     "window-text": lambda c: c["alerts"].update(slope_window_s="20"),
     "sources-text": lambda c: c["alerts"].update(measured_sources="live"),
     "sources-number": lambda c: c["alerts"].update(measured_sources=[1]),
+    "samples-one": lambda c: c["alerts"].update(slope_min_samples=1),
+    "samples-float": lambda c: c["alerts"].update(slope_min_samples=5.5),
+    "samples-bool": lambda c: c["alerts"].update(slope_min_samples=True),
+    "rise-negative": lambda c: c["alerts"].update(slope_min_mm_s=-0.001),
+    "rise-infinite": lambda c: c["alerts"].update(slope_min_mm_s=math.inf),
+    "rise-text": lambda c: c["alerts"].update(slope_min_mm_s="0.005"),
     "threshold-zero": lambda c: c["zones"]["A"].update(threshold_mm=0),
     "threshold-negative": lambda c: c["zones"]["B"].update(threshold_mm=-1),
     "threshold-nan": lambda c: c["zones"]["C"].update(threshold_mm=math.nan),
@@ -239,3 +247,66 @@ def test_slope_keeps_only_samples_within_the_window():
 )
 def test_slope_without_enough_samples_is_none(samples):
     assert slope(samples, 20.0) is None
+
+
+# 보드 기준 표본 수·최소 오름을 config 에서 읽고, 없으면 예전 판정(2 개, 0)인지 검사
+def test_rule_reads_the_board_slope_limits(config):
+    rule = Rule.config(config)
+    assert (rule.slope_min_samples, rule.slope_min_m_per_s) == (5, pytest.approx(0.000005))
+    keys = ("slope_min_samples", "slope_min_mm_s")
+    bare = Rule.config(spoiled(config, lambda c: [c["alerts"].pop(k) for k in keys]))
+    assert (bare.slope_min_samples, bare.slope_min_m_per_s) == (2, 0.0)
+
+
+# 판정 기울기: 최소 오름 이하(내림 포함)는 0, 넘으면 그대로인지 검사
+def test_rising_drops_rates_at_or_below_the_board_floor(config):
+    rule = Rule.config(config)  # 최소 오름 0.005 mm/s
+    assert rising(0.001, rule) == 0.001
+    assert rising(0.000004, rule) == 0.0
+    assert rising(0.000005, rule) == 0.0
+    assert rising(-0.002, rule) == 0.0
+
+
+# A 가 신선하면 실측 없는 구역은 A 수면 높이에서 바닥을 뺀 수위와 A 기울기로 보고
+# 도달 초가 보드의 (z − 수위) / 기울기(B z 70, C z 110 mm)와 같은지 검사
+def test_gauge_moves_the_a_surface_to_zones_without_a_sensor(config):
+    rule = Rule.config(config)
+    floors = {"A": 0.0, "B": 0.020, "C": 0.060}
+    trail = tuple((float(t), 0.001 * (t - 1)) for t in range(11, 32))  # 1 mm/s 로 30 mm 까지
+    view = gauge({"A": 0.030}, {"A": trail}, floors, rule)
+    assert view["A"] == (0.030, pytest.approx(0.001))
+    assert view["B"] == (pytest.approx(0.010), pytest.approx(0.001))
+    assert view["C"] == (pytest.approx(-0.030), pytest.approx(0.001))  # 판정은 음수 그대로
+    levels = {z: h for z, (h, _) in view.items()}
+    rates = {z: rising(r, rule) for z, (_, r) in view.items()}
+    watch = patrol({}, levels, rates, 31.0, rule)
+    assert watch["B"].stage == "caution" and watch["B"].eta_s == pytest.approx(40.0)
+    assert watch["C"].stage == "safe" and watch["C"].eta_s == pytest.approx(80.0)
+
+
+# 자기 실측이 있는 구역은 자기 값을 쓰고, A 가 신선하지 않으면 옮기지 않으며
+# 표본이 slope_min_samples 미만이면 기울기가 0 인지 검사
+def test_gauge_keeps_own_readings_and_needs_enough_samples(config):
+    rule = Rule.config(config)
+    floors = {"A": 0.0, "B": 0.020, "C": 0.060}
+    line = tuple((float(t), 0.002 * t) for t in range(1, 6))  # 2 mm/s 표본 5 개
+    view = gauge({"B": 0.010}, {"B": line}, floors, rule)
+    assert view == {"B": (0.010, pytest.approx(0.002))}
+    assert gauge({"A": -0.001}, {"A": line[:4]}, floors, rule)["A"] == (0.0, 0.0)  # 4 개, 음수 수위
+    assert gauge({}, {}, floors, rule) == {}
+
+
+# latch 면 낮아진 판정에도 단계를 두고 도달 초만 지금 판정으로, 오르는 판정은 바로 따르는지 검사
+def test_latched_stage_never_falls(config):
+    rule = Rule.config(config)
+    high = Watch("warning", 12.0, None)
+    held = verdict(high, 0.0, 0.0, 0.040, rule, 100.0, latch=True)
+    assert held == Watch("warning", None, None)
+    assert verdict(held, 0.0, 0.0, 0.040, rule, 500.0, latch=True) == held  # 유지 시간이 지나도
+    assert verdict(held, 0.0, 0.0005, 0.040, rule, 500.0, latch=True) == Watch("warning", 80.0)
+    assert verdict(held, 0.045, 0.0, 0.040, rule, 500.0, latch=True) == Watch("evacuate", 0.0)
+    loose = verdict(verdict(high, 0.0, 0.0, 0.040, rule, 100.0), 0.0, 0.0, 0.040, rule, 110.0)
+    assert loose.stage == "safe"  # latch 가 없으면 유지 시간 뒤 내림
+    levels, rates = {z: 0.0 for z in ZONES}, {z: 0.0 for z in ZONES}
+    kept = patrol({"A": high}, levels, rates, 200.0, rule, latch=True)
+    assert kept["A"].stage == "warning" and kept["B"].stage == "safe"

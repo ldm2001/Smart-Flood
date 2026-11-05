@@ -24,9 +24,14 @@ blockage_open_ratio: {none: 1.0, partial: 0.45, full: 0.08}   # ASSUMED
 correction: {gain: 0.3, max_age_s: 3.0, invalid_after_s: 10.0}   # ASSUMED
 prediction: {horizons_s: [10, 20, 30], valid_for_s: 5}
 # 주의·경계 도달 예상 상한(초), 침수 해제 비율, 내림 유지 시간(초), 기울기 창(초), 실측 판정 입력원
+# 실측 판정은 보드 forecast() 와 같은 식: 기울기 최소 표본 수, 최소 오름(mm/s), 회차 동안 단계 유지
+# 센서 없는 구역은 A 수면 높이 − 구역 바닥 높이, 예측은 수위 + 실측 기울기 × 시간
 alerts: {caution_eta_s: 60, warning_eta_s: 30, release_ratio: 0.9, release_hold_s: 10,
-         slope_window_s: 20, measured_sources: [live]}   # ASSUMED
+         slope_window_s: 20, measured_sources: [live], slope_min_samples: 5,
+         slope_min_mm_s: 0.005}   # ASSUMED
 devices: {allowed: [esp32_1, esp32_2], offline_after_s: 5}
+# 보드 회차 따라감: running 이 켜지면 live 로 바꿔 회차를 열고, 꺼지면 그렇게 연 회차를 닫음
+live: {follow: true}
 sensors:                     # ASSUMED 설치 높이·영점·배율·측정 범위(min_range_mm = 데드존, 입고 사양 확인 전)
   # max_range_mm 은 센서 사양이 아니라 모형 치수 한계다: 설치 높이 600 + 여유 50
   A: {install_height_mm: 600, zero_offset_mm: 0, scale: 1.0, min_range_mm: 200, max_range_mm: 650}

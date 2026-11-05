@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 ASSUMPTION_RULE = "현재 강우와 막힘이 예측 구간 동안 유지된다"  # 예측이 깔고 있는 가정(문장)
+TREND_RULE = "실측 상승 속도가 예측 구간 동안 유지된다"  # 실측 추세 예측의 가정(문장)
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,35 @@ def forecast(
         assumptions={
             "rule": ASSUMPTION_RULE,
             "rain_mm_per_h": cond.rain_mm_per_h,  # 유지한 강우(mm/h)
+            "blockage": dict(cond.blockage),
+        },
+        levels_m=levels,
+    )
+
+
+# 실측 추세 예측: 지금 수위 + 기울기 × 시간을 0 ~ cap_m 으로 자름(보드의 예측과 같은 식)
+def trend(
+    view: dict[str, tuple[float, float]],  # 구역 → (수위 m, 기울기 m/s)
+    cond: Conditions,
+    params: Params,
+    *,
+    basis_elapsed_s: float,  # 입력 기준 시각(초)
+    horizons_s: Iterable[int],  # 예측할 시점들(초)
+    valid_for_s: float,  # 유효 기간(초)
+    cap_m: float,  # 수위 상한(m)
+) -> Prediction:
+    horizons = sorted({int(h) for h in horizons_s})
+    levels = {
+        z: {h: min(cap_m, max(0.0, level + rate * h)) for h in horizons}
+        for z, (level, rate) in view.items()
+    }
+    return Prediction(
+        basis_elapsed_s=basis_elapsed_s,
+        model_version=params.model_version,
+        valid_for_s=valid_for_s,
+        assumptions={
+            "rule": TREND_RULE,
+            "rain_mm_per_h": cond.rain_mm_per_h,  # 그때 고른 강우(mm/h)
             "blockage": dict(cond.blockage),
         },
         levels_m=levels,
