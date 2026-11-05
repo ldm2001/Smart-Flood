@@ -48,28 +48,28 @@ def server():
 
 # 주소를 호스트·포트·경로로 나누고, 포트 생략은 80, 경로 생략은 / 인지 검사
 def test_parse_splits_the_url():
-    parsed = client.parse("http://192.168.0.10:8000/api/ingest")
+    parsed = client.endpoint("http://192.168.0.10:8000/api/ingest")
     assert parsed == ("192.168.0.10", 8000, "/api/ingest")
-    assert client.parse("http://flood.local") == ("flood.local", 80, "/")
+    assert client.endpoint("http://flood.local") == ("flood.local", 80, "/")
 
 
 # https 는 받지 않는지 검사(보드는 TLS 없이 보냄)
 def test_parse_rejects_https():
     with pytest.raises(ValueError):
-        client.parse("https://192.168.0.10/api/ingest")
+        client.endpoint("https://192.168.0.10/api/ingest")
 
 
 # JSON 본문이 그대로 닿고 상태 코드가 돌아오는지 검사
 def test_post_delivers_json(server):
     body = {"deviceId": "esp32_1", "seq": 3}
-    assert client.post(server + "/api/ingest", body, 0.4) == 200
+    assert client.response(server + "/api/ingest", body, 0.4) == 200
     assert Handler.seen == [("/api/ingest", "application/json", body)]
 
 
 # 서버가 거절(422)하면 그 코드를 돌려주는지 검사
 def test_post_returns_the_server_status(server):
     Handler.status = 422
-    assert client.post(server + "/api/ingest", {}, 0.4) == 422
+    assert client.response(server + "/api/ingest", {}, 0.4) == 422
 
 
 # 닫힌 포트는 OSError 인지 검사
@@ -79,7 +79,7 @@ def test_post_to_a_closed_port_raises():
     port = probe.getsockname()[1]
     probe.close()
     with pytest.raises(OSError):
-        client.post("http://127.0.0.1:{}/api/ingest".format(port), {}, 0.4)
+        client.response("http://127.0.0.1:{}/api/ingest".format(port), {}, 0.4)
 
 
 # 응답이 없으면 제한 시간 안에 OSError 로 끝나는지 검사
@@ -89,23 +89,23 @@ def test_post_gives_up_after_the_timeout():
     quiet.listen(1)
     start = time.monotonic()
     with pytest.raises(OSError):
-        client.post("http://127.0.0.1:{}/api/ingest".format(quiet.getsockname()[1]), {}, 0.3)
+        client.response("http://127.0.0.1:{}/api/ingest".format(quiet.getsockname()[1]), {}, 0.3)
     assert time.monotonic() - start < 1.5
     quiet.close()
 
 
-# send 는 2xx 면 조용히 끝나고, 거절되면 상태 코드를 담은 OSError 인지 검사
+# delivery 는 2xx 면 조용히 끝나고, 거절되면 상태 코드를 담은 OSError 인지 검사
 def test_send_raises_when_the_server_rejects(server):
-    assert client.send(server + "/api/ingest", {}, 0.4) is None
+    assert client.delivery(server + "/api/ingest", {}, 0.4) is None
     Handler.status = 422
     with pytest.raises(OSError, match="422"):
-        client.send(server + "/api/ingest", {}, 0.4)
+        client.delivery(server + "/api/ingest", {}, 0.4)
 
 
 # localhost 처럼 IPv6 주소(::1)가 먼저 풀리는 이름으로도 닿는지 검사. IPv4 항목을 골라 연결해야 함
 def test_post_reaches_the_server_through_localhost(server):
     url = server.replace("127.0.0.1", "localhost")
-    assert client.post(url + "/api/ingest", {"seq": 0}, 0.4) == 200
+    assert client.response(url + "/api/ingest", {"seq": 0}, 0.4) == 200
 
 
 # 서버 주소 정리: 양끝 공백과 끝 슬래시 제거, 빈 값은 그대로, http:// 가 아니면 ValueError 인지 검사

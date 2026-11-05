@@ -6,7 +6,7 @@ import socket
 
 
 # http://host[:port][/path] → (host, port, path)
-def parse(url):
+def endpoint(url):
     if not url.startswith("http://"):
         raise ValueError("http:// 주소만 받음: " + url)
     rest = url[7:]
@@ -33,8 +33,8 @@ def address(host, port):
 
 
 # JSON 본문을 POST 하고 응답 상태 코드를 돌려줌. 연결과 응답 읽기가 각각 timeout_s 안에 끝나야 함
-def post(url, body, timeout_s=0.4):
-    host, port, path = parse(url)
+def response(url, body, timeout_s=0.4):
+    host, port, path = endpoint(url)
     data = json.dumps(body).encode()
     head = (
         "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\n"
@@ -56,9 +56,9 @@ def post(url, body, timeout_s=0.4):
     return status(line)
 
 
-# post 하고 2xx 가 아니면 OSError. 보드 층의 post 가 그대로 씀
-def send(url, body, timeout_s=0.4):
-    code = post(url, body, timeout_s)
+# response 로 보내고 2xx 가 아니면 OSError. 보드 층의 delivery 가 그대로 씀
+def delivery(url, body, timeout_s=0.4):
+    code = response(url, body, timeout_s)
     if not 200 <= code < 300:
         raise OSError("서버 응답 {}".format(code))
 

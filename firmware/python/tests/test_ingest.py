@@ -29,7 +29,7 @@ def test_distance_is_rounded_to_one_decimal():
 
 # 부팅 ID 는 무작위 바이트의 16진 글자인지 검사
 def test_boot_id_is_hex():
-    assert ingest.boot_id(b"\x01\xab\xff\x00") == "01abff00"
+    assert ingest.bootid(b"\x01\xab\xff\x00") == "01abff00"
 
 
 # 장치 이름과 설치 높이를 바꿀 수 있는지 검사

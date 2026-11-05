@@ -36,7 +36,7 @@ def setting(name):
 
 
 # 와이파이 접속. 성공이면 IP 문자열, 실패면 None
-def connect(wlan, ssid, password, wait_ms=WIFI_WAIT_MS):
+def connection(wlan, ssid, password, wait_ms=WIFI_WAIT_MS):
     wlan.active(True)
     if not wlan.isconnected():
         wlan.connect(ssid, password)
@@ -48,7 +48,7 @@ def connect(wlan, ssid, password, wait_ms=WIFI_WAIT_MS):
     return wlan.ifconfig()[0]
 
 
-# 보드 층: ADC 64회 평균 전압, ticks 기반 시각, 전송은 client.send(주소가 없으면 REPL 에 찍음)
+# 보드 층: ADC 64회 평균 전압, ticks 기반 시각, 전송은 client.delivery(주소가 없으면 REPL 에 찍음)
 # 와이파이가 끊겨 있으면 그 전송은 실패로 알리고 REJOIN_MS 마다 재접속 시작
 class Esp:
     def __init__(self, server, watchdog=None, wlan=None, ssid="", password=""):
@@ -57,31 +57,31 @@ class Esp:
         self.wlan = wlan
         self.ssid = ssid
         self.password = password
-        self.linked = wlan is not None and wlan.isconnected()  # 붙은 IP 를 찍었는지
+        self.linked = wlan is not None and wlan.isconnected()  # 붙은 IP 를 찍었는지 표시
         self.tried = None  # 마지막 재접속 시각
         self.adc = machine.ADC(machine.Pin(LEVEL_PIN))
         self.adc.atten(machine.ADC.ATTN_11DB)
         machine.Pin(RELAY_PIN, machine.Pin.IN)  # 릴레이는 끔. 펌프 출력 없음
         machine.Pin(FLOAT_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
 
-    def read_mv(self):
+    def voltage(self):
         return level.mean([self.adc.read_uv() / 1000.0 for _ in range(READS)])
 
-    def post(self, body):
+    def delivery(self, body):
         if not self.server:
             print(json.dumps(body))
             return
         if not self.wlan.isconnected():
             self.linked = False
-            self.rejoin()
+            self.recovery()
             raise OSError("와이파이 끊김")
         if not self.linked:
             self.linked = True
             print("wifi", self.wlan.ifconfig()[0])
-        client.send(self.server + ingest.PATH, body, 0.4)
+        client.delivery(self.server + ingest.PATH, body, 0.4)
 
     # 끊긴 와이파이 재접속 시작. 접속을 기다리지 않아 감시 타이머를 넘기지 않음
-    def rejoin(self):
+    def recovery(self):
         now = time.ticks_ms()
         if self.tried is not None and time.ticks_diff(now, self.tried) < REJOIN_MS:
             return
@@ -95,22 +95,22 @@ class Esp:
         except OSError as error:
             print("wifi 오류:", error)
 
-    def now_ms(self):
+    def clock(self):
         return time.ticks_ms()
 
-    def sleep_ms(self, ms):
+    def pause(self, ms):
         time.sleep_ms(ms)
 
-    def diff(self, a, b):
+    def span(self, a, b):
         return time.ticks_diff(a, b)
 
-    def add(self, t, ms):
+    def deadline(self, t, ms):
         return time.ticks_add(t, ms)
 
-    def log(self, text):
+    def journal(self, text):
         print(text)
 
-    def keepalive(self):
+    def heartbeat(self):
         if self.watchdog:
             self.watchdog.feed()
 
@@ -118,7 +118,7 @@ class Esp:
 # 부팅 후 실행. 와이파이와 서버 주소가 있으면 서버로 보내고, 없으면 REPL 에 메시지를 찍음
 # 설정이 잘못되면 이유를 찍고 REPL 출력으로 넘어감. 부팅 때 와이파이가 실패하면 서버 주소는 두고
 # 보낼 때마다 다시 붙어 봄
-def run(cycles=None):
+def startup(cycles=None):
     try:
         server = client.base(setting("SERVER_URL"))
     except ValueError as error:
@@ -130,7 +130,7 @@ def run(cycles=None):
     if server and ssid:
         wlan = network.WLAN(network.STA_IF)
         try:
-            ip = connect(wlan, ssid, password)
+            ip = connection(wlan, ssid, password)
         except OSError as error:  # 잘못된 암호 등 드라이버 오류
             print("wifi 오류:", error)
             ip = None
@@ -140,9 +140,9 @@ def run(cycles=None):
         server = ""
     watchdog = machine.WDT(timeout=WDT_MS) if server else None
     board = Esp(server, watchdog, wlan, ssid, password)
-    sensor = node.Node(ingest.boot_id(os.urandom(4)))
+    sensor = node.Node(ingest.bootid(os.urandom(4)))
     node.loop(sensor, board, cycles=cycles)
 
 
 if __name__ == "__main__":
-    run()
+    startup()

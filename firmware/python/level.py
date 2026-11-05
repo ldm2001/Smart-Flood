@@ -20,7 +20,7 @@ class Line:
     def point1(self, mv, mm):
         return Line(SLOPE_THEORY, mm - SLOPE_THEORY * mv, (mv, mm))
 
-    # 2점 보정: 1점 기록과 지금 점으로 기울기까지 맞춤. 1점이 없거나 전압 차가 작으면 그대로
+    # 2점 보정: 1점 기록과 지금 점으로 기울기까지 맞춤. 1점이 없거나 전압 차가 작으면 그대로 돌려줌
     def point2(self, mv, mm):
         if self.point is None or abs(mv - self.point[0]) <= GAP_MV:
             return self
@@ -28,11 +28,11 @@ class Line:
         return Line(slope, mm - slope * mv, self.point)
 
     # 보정 초기화: 이론 직선
-    def reset(self):
+    def theory(self):
         return Line()
 
 
-# 전압이 센서 정상 범위 밖인지(단선·단락). NaN 도 이상
+# 전압이 센서 정상 범위 밖인지 봄(단선·단락). NaN 도 이상
 def fault(mv):
     return not (FAULT_LOW_MV <= mv <= FAULT_HIGH_MV)
 
