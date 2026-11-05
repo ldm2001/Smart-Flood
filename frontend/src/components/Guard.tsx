@@ -33,7 +33,7 @@ export function Guard({ control, name, question, onYes, onNo }: Props) {
       }}
       className="mt-3 rounded-lg border border-line p-3"
     >
-      <p>{question}</p>
+      <p className="leading-normal">{question}</p>
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" className={LOOK} onClick={onYes}>
           예

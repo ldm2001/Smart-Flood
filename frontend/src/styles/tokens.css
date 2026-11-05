@@ -1,5 +1,5 @@
 /* 화면 색·글꼴 토큰. 밤의 상황실 먹색 바탕 하나에 강조는 물 파란색 하나만 씀.
-   전시장에서 쓰는 어두운 화면 하나만 둠. 웹 글꼴은 받지 않고 기기 글꼴을 씀 */
+   전시장에서 쓰는 어두운 화면 하나만 둠. 글꼴은 빌드에 넣은 Pretendard 가변 글꼴을 먼저 씀 */
 
 :root {
   color-scheme: dark;
@@ -29,7 +29,8 @@
   --zone-b: #08908c;
   --zone-c: #cf57c8;
 
-  --font-body: Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  /* --font-pretendard 는 layout.tsx 의 next/font 가 html 에 붙임. 뒤는 받기 전·실패 때 대체 글꼴 */
+  --font-body: var(--font-pretendard), Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
   --font-code: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -90,7 +91,7 @@
   --font-mono: var(--font-code);
   --ease-calm: cubic-bezier(0.22, 1, 0.36, 1);
   --default-transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-  /* 핵심 수치 28px(지시서 6장: 28px 이상). text-key 로 씀. 줄 높이는 쓰는 곳에서 정함 */
+  /* 핵심 수치 28px(지시서 6장: 28px 이상). text-key 로 씀. 줄 높이는 globals.css 에서 정함 */
   --text-key: 1.75rem;
   /* 카드 수위 숫자 32px */
   --text-figure: 2rem;

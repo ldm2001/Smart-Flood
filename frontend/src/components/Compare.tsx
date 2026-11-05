@@ -40,14 +40,14 @@ export function Compare({ events, ended = false }: { events: readonly LogEvent[]
           </tbody>
         </table>
       </div>
-      <p className="mt-3 text-base text-muted">
+      <p className="mt-3 text-base leading-normal text-muted">
         예측 도달은 위험 판단 시각에 그때 남은 초를 더한 값이고,
         오차는 실제 도달에서 예측 도달을 뺀 초입니다.
       </p>
-      <p className="mt-1 text-base text-muted">
+      <p className="mt-1 text-base leading-normal text-muted">
         현재 수위 경보는 한계에 닿을 때 울립니다. 선행 시간은 그보다 먼저 알린 초입니다.
       </p>
-      <p className="mt-1 text-base text-muted">{score(lines, ended)}</p>
+      <p className="mt-1 text-base leading-normal text-muted">{score(lines, ended)}</p>
     </section>
   );
 }

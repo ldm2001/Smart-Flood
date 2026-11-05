@@ -31,7 +31,7 @@ function Entries({ log }: { log: Events | null }) {
   }
   if (log.list.length === 0) return <p className="text-muted">표시할 이벤트가 없습니다</p>;
   return (
-    <ol className="space-y-2">
+    <ol className="space-y-2 leading-normal">
       {rows(log.list).map((event) => (
         <li
           key={`${event.elapsedSec}:${event.kind === "stage" ? event.zone : "error"}`}

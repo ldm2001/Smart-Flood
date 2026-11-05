@@ -19,10 +19,10 @@ export function Headline({ banner, guide = null }: { banner: Banner | null; guid
         <p className="font-medium text-(--stage,var(--muted))">{banner ? STAGE_LABELS[banner.stage] : "자료 대기"}</p>
         {// 경보 문구. 배너가 없으면 기다리는 중 안내
         }
-        <h2 className="text-2xl leading-snug font-medium">{banner?.message ?? "수위 자료를 기다리는 중입니다"}</h2>
+        <h2 className="text-2xl leading-normal font-medium">{banner?.message ?? "수위 자료를 기다리는 중입니다"}</h2>
         {// 대피 안내. route 가 서버 alerts 로 만든 한 줄
         }
-        {guide && <p className="mt-1 text-base text-muted">{guide}</p>}
+        {guide && <p className="mt-1 text-base leading-normal text-muted">{guide}</p>}
       </div>
     </section>
   );

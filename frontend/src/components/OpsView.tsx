@@ -128,14 +128,14 @@ export function Sheet(props: Board) {
       </header>
 
       {props.halt !== null && (
-        <p id="ops-halt" className="flex items-center gap-2 font-medium">
+        <p id="ops-halt" className="flex items-center gap-2 leading-normal font-medium">
           <Glyph name="info" />
           {props.halt}
         </p>
       )}
       {// 결과 줄. 바뀐 글을 낭독기가 읽도록 비어도 자리를 둠
       }
-      <p id="ops-note" aria-live="polite" className="mt-1 flex min-h-7 items-center gap-2">
+      <p id="ops-note" aria-live="polite" className="mt-1 flex min-h-7 items-center gap-2 leading-normal">
         {props.sending !== null && (
           <>
             <Glyph name="dots" />

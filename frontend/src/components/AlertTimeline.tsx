@@ -80,7 +80,7 @@ export function Timeline({ log, notifier, past = false }: Props) {
       </div>
       {// S2 는 문자를 보내지 않아 도착 확인은 늘 불가
       }
-      <p className="mt-4 text-base text-muted">휴대전화 도착 확인 · 확인 불가(시험 번호 미연결)</p>
+      <p className="mt-4 text-base leading-normal text-muted">휴대전화 도착 확인 · 확인 불가(시험 번호 미연결)</p>
     </section>
   );
 }

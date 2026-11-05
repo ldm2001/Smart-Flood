@@ -53,7 +53,7 @@ export function Origin({ snapshot, gates, open, onPress }: Props) {
         />
       )}
       <Reasons lines={lines} />
-      <p className="mt-3 text-base text-muted">재생 시작은 기록·재생 화면에서 합니다.</p>
+      <p className="mt-3 text-base leading-normal text-muted">재생 시작은 기록·재생 화면에서 합니다.</p>
     </section>
   );
 }

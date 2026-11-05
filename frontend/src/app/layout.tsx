@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Glyph } from "@/components/Glyph";
@@ -12,10 +13,18 @@ export const metadata: Metadata = {  // 탭 제목과 설명 정보(Next 가 읽
 
 export const viewport: Viewport = { themeColor: "#0b0d14" };  // 브라우저 테마 색(Next 고정 이름)
 
+// Pretendard 가변 글꼴. 빌드 때 out 에 담겨 기기에 글꼴이 없어도 같은 글꼴로 보임
+const pretendard = localFont({
+  src: "../../node_modules/pretendard/dist/web/variable/woff2/PretendardVariable.woff2",
+  weight: "45 920",  // 가변 굵기 범위
+  display: "swap",  // 받기 전에는 대체 글꼴로 먼저 보임
+  variable: "--font-pretendard",  // tokens.css 의 --font-body 맨 앞에서 씀
+});
+
 // 모든 페이지를 감싸는 공통 틀
 export default function Layout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="ko">
+    <html lang="ko" className={pretendard.variable}>
       <body>
         {// 전체 틀. 넓으면 옆 메뉴와 본문을 나란히 놓음
         }
@@ -39,7 +48,7 @@ export default function Layout({ children }: Readonly<{ children: ReactNode }>) 
             {// 각 페이지 내용이 들어가는 자리
             }
             <div className="flex-1">{children}</div>
-            <footer className="border-t border-line px-4 py-4 text-muted md:px-8">
+            <footer className="border-t border-line px-4 py-4 leading-normal text-muted md:px-8">
               시험용 화면입니다. 실제 재난 판단·재난문자에 쓸 수 없습니다.
             </footer>
           </div>
