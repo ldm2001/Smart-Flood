@@ -2,7 +2,8 @@ import { clock, mark, score, span, tally } from "@/lib/derive";
 import { ZONES } from "@/lib/layout-data";
 import type { LogEvent } from "@/lib/schema";
 
-const HEADS = ["구역", "위험 판단", "예측 도달", "실제 도달", "선행 시간", "오차", "판정"];  // 표 머리 글
+// 표 머리 글
+const HEADS = ["구역", "위험 판단", "예측 도달", "실제 도달", "선행 시간", "오차", "판정"];
 const time = (ms: number | null) => (ms === null ? "—" : clock(ms));  // 시각 칸 글(HH:MM:SS)
 
 // 기록의 구역별 예측 도달과 실제 도달 비교 표. 사건 전에는 모두 줄표

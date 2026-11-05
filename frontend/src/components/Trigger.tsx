@@ -4,7 +4,8 @@ import type { Gate, Reason } from "@/lib/derive";
 // 꺼진 판정의 이유 글 자리
 type Cue = Extract<Gate, { on: false }>["cue"];
 
-const CUES: Partial<Record<Cue, string>> = { halt: "ops-halt", note: "ops-note" };  // 칸 밖 이유 줄 id
+// 칸 밖 이유 줄 id
+const CUES: Partial<Record<Cue, string>> = { halt: "ops-halt", note: "ops-note" };
 
 export const LOOK = [  // 제어 단추 모양. Menu 링크의 토큰에 꺼짐·지금 변형만 더함
   "inline-flex h-10 items-center gap-2 rounded-lg border border-line px-3 whitespace-nowrap",

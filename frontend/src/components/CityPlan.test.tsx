@@ -17,7 +17,7 @@ const FULL = { location: "INLET-03", type: "full", label: "빗물받이 ③ 완�
 const CLEAR = { location: null, type: "none", label: "정상 배수" } as const;
 
 // 상태의 alerts 로 단계를 구해 그린 평면도
-function draw(snapshot: Snapshot | null, thresholds: Thresholds | null = THRESHOLDS) {
+function markup(snapshot: Snapshot | null, thresholds: Thresholds | null = THRESHOLDS) {
   const statuses = snapshot && roster(snapshot.alerts);
   return renderToStaticMarkup(
     <Plan snapshot={snapshot} statuses={statuses} thresholds={thresholds} />,
@@ -26,7 +26,7 @@ function draw(snapshot: Snapshot | null, thresholds: Thresholds | null = THRESHO
 
 describe("Plan", () => {
   it("marks a fully blocked inlet in red and a heavier weight", () => {
-    const html = draw({ ...SIM, blockage: FULL });
+    const html = markup({ ...SIM, blockage: FULL });
     const text = content(html);
     expect(html).toMatch(/<span class="[^"]*font-medium text-\(--red\)" style="[^"]*">③<\/span>/);
     expect(html).toContain('<circle class="fill-panel stroke-(--red)');
@@ -37,14 +37,14 @@ describe("Plan", () => {
   });
 
   it("marks the partial blockage of the simulation in amber", () => {
-    const html = draw(SIM);
+    const html = markup(SIM);
     expect(html).toMatch(/<span class="[^"]*font-medium text-amber" style="[^"]*">②<\/span>/);
     expect(html).toContain('<circle class="fill-panel stroke-amber');
     expect(content(html)).toContain("[half] 빗물받이 ② 부분 막힘");
   });
 
   it("shows a clear drain when nothing is blocked", () => {
-    const html = draw({ ...SIM, blockage: CLEAR });
+    const html = markup({ ...SIM, blockage: CLEAR });
     const text = content(html);
     expect(html).toContain('<p class="chip border border-line">');
     expect(text).toContain("[circle] 정상 배수");
@@ -54,14 +54,14 @@ describe("Plan", () => {
 
   it("fills the water from the bottom by the threshold ratio", () => {
     const zones = { ...SIM.zones, A: { ...SIM.zones.A, levelMm: 22.5 } };  // A 한계 45 의 절반
-    expect(draw({ ...SIM, zones })).toContain(
+    expect(markup({ ...SIM, zones })).toContain(
       '<rect class="fill-brand/35" x="10" y="60" width="90" height="50"></rect>',
     );
-    expect(draw(SIM, null)).not.toContain("fill-brand/35");
+    expect(markup(SIM, null)).not.toContain("fill-brand/35");
   });
 
   it("lists each zone with its level, stage and source", () => {
-    const html = draw(SIM);
+    const html = markup(SIM);
     const text = content(html);
     expect(text).toContain("A 낮은 상가 도로 · 44.9 mm · [triangle] 경계 · 가상 실측");
     expect(text).toContain("B 주택 골목 · 31.8 mm · [check] 정상 · 가상 실측");
@@ -73,13 +73,13 @@ describe("Plan", () => {
   });
 
   it("shows the drain meter", () => {
-    const text = content(draw(SIM));
+    const text = content(markup(SIM));
     expect(text).toContain("하부 배수 계량 누적 배수량 0.76 L 유량 0.65 L/min");
   });
 
   it("shows the notes and no threshold text", () => {
     for (const snapshot of [SIM, null]) {
-      const text = content(draw(snapshot));
+      const text = content(markup(snapshot));
       expect(text).toContain(
         "C 구역은 수위 센서가 없어 늘 모델로 추정합니다. " +
           "A·B 도 최근 관측이 없는 동안은 추정값입니다.",
@@ -93,7 +93,7 @@ describe("Plan", () => {
   });
 
   it("shows dashes while connecting", () => {
-    const html = draw(null, null);
+    const html = markup(null, null);
     const text = content(html);
     expect(text).toContain("① INLET-01 · A 구역 · —");
     expect(text).toContain("A 낮은 상가 도로 · —");

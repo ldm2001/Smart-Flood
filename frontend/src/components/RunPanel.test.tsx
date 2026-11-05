@@ -25,7 +25,7 @@ function state(runState: Run | undefined, dataSource: Input = "sim"): Snapshot {
 }
 
 // online 판정으로 그린 회차 칸
-function draw(snapshot: Snapshot | null, open: Hazard | null = null) {
+function markup(snapshot: Snapshot | null, open: Hazard | null = null) {
   return renderToStaticMarkup(
     <Round
       snapshot={snapshot}
@@ -39,7 +39,7 @@ function draw(snapshot: Snapshot | null, open: Hazard | null = null) {
 
 describe("Round", () => {
   it("shows dashes and points every control at the halt line before the first answer", () => {
-    const html = draw(null, "stop");
+    const html = markup(null, "stop");
     expect(content(html)).toContain("상태 실험 — 실험 ID — 경과 —");
     for (const id of ["ops-start", "ops-stop", "ops-reset"]) {
       expect(button(html, id)).toContain('aria-disabled="true" aria-describedby="ops-halt"');
@@ -48,7 +48,7 @@ describe("Round", () => {
   });
 
   it("lets an idle run start or reset, but not stop", () => {
-    const html = draw(state("idle"));
+    const html = markup(state("idle"));
     expect(content(html)).toContain("상태 [pause] 실험 대기");
     expect(content(html)).toMatch(/실험 ID EXP-DEMO-\d{3} 경과 42초/);  // 경과 초는 내림
     expect(button(html, "ops-start")).not.toContain('aria-disabled="');
@@ -58,7 +58,7 @@ describe("Round", () => {
   });
 
   it("lets a running round stop, but not start again", () => {
-    const html = draw(state("running"));
+    const html = markup(state("running"));
     expect(content(html)).toContain("상태 [play] 실험 진행 중");
     expect(content(html)).toContain(" 시작 종료 초기화 ");
     expect(button(html, "ops-stop")).not.toContain('aria-disabled="');
@@ -67,14 +67,14 @@ describe("Round", () => {
   });
 
   it("starts again from a stopped round", () => {
-    const html = draw(state("stopped"));
+    const html = markup(state("stopped"));
     expect(content(html)).toContain("상태 [stop] 실험 정지");
     expect(button(html, "ops-start")).not.toContain('aria-disabled="');
     expect(button(html, "ops-stop")).toContain('aria-describedby="ops-why-stop"');
   });
 
   it("names stop for the replay and leaves only that on while it plays", () => {
-    const html = draw(state("running", "replay"));
+    const html = markup(state("running", "replay"));
     expect(content(html)).toContain(" 시작 재생 멈춤 초기화 ");
     expect(button(html, "ops-stop")).not.toContain('aria-disabled="');
     expect(html).toContain(
@@ -84,14 +84,14 @@ describe("Round", () => {
   });
 
   it("turns the replay stop off once the replay has stopped", () => {
-    const html = draw(state("stopped", "replay"));
+    const html = markup(state("stopped", "replay"));
     expect(button(html, "ops-stop")).toContain('aria-describedby="ops-why-stop"');
     expect(html).toContain('<li id="ops-why-stop">재생이 멈춰 있습니다</li>');
   });
 
   // 회차 상태가 없으면 시작·종료가 한 이유 줄을 같이 가리키는지 검사
   it("shares one reason line between start and stop when the run state is missing", () => {
-    const html = draw(state(undefined));
+    const html = markup(state(undefined));
     const text = "서버가 회차 상태를 보내지 않았습니다";
     expect(content(html)).toContain("상태 실험 —");
     expect(button(html, "ops-start")).toContain('aria-describedby="ops-why-start"');
@@ -101,12 +101,12 @@ describe("Round", () => {
   });
 
   it("opens the check line of stop or reset inside the panel", () => {
-    const stop = draw(state("running"), "stop");
+    const stop = markup(state("running"), "stop");
     expect(stop).toContain('role="group" aria-label="종료 확인" data-opener="ops-stop"');
     expect(content(stop)).toContain("회차를 종료할까요? 비가 그치고 마지막 상태가 남습니다 예 취소");
-    const reset = draw(state("idle"), "reset");
+    const reset = markup(state("idle"), "reset");
     expect(reset).toContain('aria-label="초기화 확인" data-opener="ops-reset"');
     expect(content(reset)).toContain("강우·막힘 선택만 기본값(보통 강우, 막힘 없음)으로 돌립니다");
-    expect(draw(state("running"), "sim")).not.toContain('role="group"');  // 입력원 줄은 다른 칸
+    expect(markup(state("running"), "sim")).not.toContain('role="group"');  // 입력원 줄은 다른 칸
   });
 });

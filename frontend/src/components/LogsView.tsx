@@ -96,7 +96,7 @@ function Desk({ id }: { id: string | null }) {
   const gate = pass(own, rerun(snapshot, chosen ?? ""));
   if (open !== null && !gate.on) setOpen(null);  // 판정이 꺼진 확인 줄은 닫음
   // 재생 시작을 보냄. 반영되면 응답 상태를 캐시에 넣음
-  const send = async (request: Command) => {
+  const sender = async (request: Command) => {
     if (sending !== null || !gate.on) return;  // 두 번 누름과 꺼진 제어를 막음
     const replay = snapshot?.dataSource === "replay";  // 결과 글은 보낼 때 기준
     setSending(request.control);
@@ -110,7 +110,7 @@ function Desk({ id }: { id: string | null }) {
   const press = (input: Press) => {
     const next = step(open, input);
     setOpen(next.open);
-    if (next.send === "replay" && chosen !== null) void send(playback(chosen));
+    if (next.send === "replay" && chosen !== null) void sender(playback(chosen));
   };
   return (
     <Shelf

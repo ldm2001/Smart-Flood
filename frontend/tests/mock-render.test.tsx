@@ -140,7 +140,8 @@ describe("check 9 and the screens", () => {
     for (const id of CONTROLS) {
       expect(html).toMatch(new RegExp(`<button[^>]* id="${id}" aria-disabled="true"`));
     }
-    expect(text).not.toContain("서버 미연결");  // 한계 수위 칸의 "가상 데이터용" 은 늘 보여 이 글로 봄
+    // 한계 수위 칸의 "가상 데이터용" 은 늘 보여 이 글로 봄
+    expect(text).not.toContain("서버 미연결");
     expect(text).not.toContain("EXP-");  // 실험 번호 없음
     expect(text).not.toMatch(/\d{2}:\d{2}:\d{2}/);  // 시각 모양 글자 없음
   });

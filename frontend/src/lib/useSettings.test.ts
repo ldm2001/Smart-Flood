@@ -73,26 +73,26 @@ describe("settings store", () => {
     const storage = memory();
     const store = vault(() => storage);
     const listener = vi.fn();
-    const unsubscribe = store.subscription(listener);
+    const cleanup = store.subscription(listener);
 
     store.revision({ thresholds: { A: 40, B: -5, C: 60 } });
     expect(listener).toHaveBeenCalledTimes(1);
     expect(JSON.parse(storage.getItem(SETTINGS_KEY) ?? "null")).toEqual({ thresholds: { A: 40, B: 55, C: 60 } });
     expect(store.reading().thresholds).toEqual({ A: 40, B: 55, C: 60 });
-    unsubscribe();
+    cleanup();
   });
 
   it("reset removes the saved value", () => {
     const storage = memory({ [SETTINGS_KEY]: payload({ A: 40, B: 50, C: 60 }) });
     const store = vault(() => storage);
     const listener = vi.fn();
-    const unsubscribe = store.subscription(listener);
+    const cleanup = store.subscription(listener);
 
     store.defaults();  // 기본값으로 되돌림
     expect(storage.getItem(SETTINGS_KEY)).toBeNull();
     expect(store.reading()).toBe(DEFAULT_SETTINGS);
     expect(listener).toHaveBeenCalledTimes(1);
-    unsubscribe();
+    cleanup();
   });
 
   it("works without storage access and keeps changes for this tab", () => {
@@ -126,12 +126,12 @@ describe("settings store", () => {
     vi.stubGlobal("window", target);
     const store = vault(() => memory());
     const listener = vi.fn();
-    const unsubscribe = store.subscription(listener);
+    const cleanup = store.subscription(listener);
 
     target.dispatchEvent(new Event("storage"));
     expect(listener).toHaveBeenCalledTimes(1);
 
-    unsubscribe();
+    cleanup();
     target.dispatchEvent(new Event("storage"));
     expect(listener).toHaveBeenCalledTimes(1);
   });

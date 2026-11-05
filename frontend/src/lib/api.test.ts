@@ -33,32 +33,32 @@ async function instance(base?: string) {
 
 // 정해진 응답을 주는 가짜 서버를 만듦
 function server(body: unknown, status = 200) {
-  const fetch = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
+  const stub = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
     Response.json(body, { status }),
   );
-  vi.stubGlobal("fetch", fetch);
-  return fetch;
+  vi.stubGlobal("fetch", stub);
+  return stub;
 }
 
 // 응답이 없는 가짜 서버. 요청이 끊기면 그 이유로 실패
 function silence() {
-  const fetch = vi.fn(
+  const stub = vi.fn(
     (_url: string, init?: RequestInit) =>
       new Promise<Response>((_, reject) => {
         init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
       }),
   );
-  vi.stubGlobal("fetch", fetch);
-  return fetch;
+  vi.stubGlobal("fetch", stub);
+  return stub;
 }
 
 // JSON 이 아닌 본문을 주는 가짜 서버를 만듦
 function noise(status: number) {
-  const fetch = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
+  const stub = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(async () =>
     new Response("<html>오류</html>", { status }),
   );
-  vi.stubGlobal("fetch", fetch);
-  return fetch;
+  vi.stubGlobal("fetch", stub);
+  return stub;
 }
 
 // 닿지 못하는 가짜 서버. 브라우저처럼 TypeError 로 실패
@@ -68,7 +68,7 @@ function blackout() {
 
 // 머리만 오고 본문이 멈춘 가짜 서버. 요청이 끊기면 본문 읽기가 실패
 function stall() {
-  const fetch = vi.fn(
+  const stub = vi.fn(
     async (_url: string, init?: RequestInit) =>
       ({
         ok: true,
@@ -81,8 +81,8 @@ function stall() {
           }),
       }) as unknown as Response,
   );
-  vi.stubGlobal("fetch", fetch);
-  return fetch;
+  vi.stubGlobal("fetch", stub);
+  return stub;
 }
 
 const signal = (fetch: ReturnType<typeof silence>) => fetch.mock.calls[0][1]?.signal;

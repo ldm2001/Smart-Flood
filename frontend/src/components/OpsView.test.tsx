@@ -61,7 +61,7 @@ const delivery = (control: Control, answer: Answer): Delivery => ({
 });
 
 // Desk 처럼 연결에서 멈춤 글과 판정을 구해 그린 운영 화면
-function draw(snapshot: Snapshot | null, contact = ONLINE, extra: Partial<Board> = {}) {
+function markup(snapshot: Snapshot | null, contact = ONLINE, extra: Partial<Board> = {}) {
   const link = linkage(contact.now, contact.receivedAt, contact.failed);
   const board: Board = {
     ...contact,
@@ -84,7 +84,7 @@ function draw(snapshot: Snapshot | null, contact = ONLINE, extra: Partial<Board>
 
 describe("Sheet", () => {
   it("turns every server control off with the halt line while connecting", () => {
-    const html = draw(null, CONNECTING, BARE);
+    const html = markup(null, CONNECTING, BARE);
     expect(content(html)).toContain("A·B·C 구역 침수 모형 운영·설정 [circle] 모드 — [dots] 연결 중");
     expect(content(html)).toContain("[info] 서버에 연결하는 중이라 제어를 끕니다");
     for (const id of SERVER) {
@@ -96,7 +96,7 @@ describe("Sheet", () => {
   });
 
   it("marks mock data and keeps every control from reaching the server", () => {
-    const html = draw(null, MOCK, BARE);
+    const html = markup(null, MOCK, BARE);
     expect(content(html)).toContain("가상 데이터(서버 미연결)");
     expect(content(html)).toContain("[nowifi] 연결 끊김 · 마지막 수신 —");
     expect(content(html)).toContain(
@@ -109,7 +109,7 @@ describe("Sheet", () => {
   });
 
   it("keeps the last values but turns controls off once the link is lost", () => {
-    const html = draw(state("running"), LOST);
+    const html = markup(state("running"), LOST);
     expect(content(html)).toContain("[nowifi] 연결 끊김 · 마지막 수신 10:00:00");
     expect(content(html)).toContain("[info] 연결이 끊겨 제어를 끕니다 · 마지막 수신 10:00:00 기준");
     expect(content(html)).toContain("[play] 실험 진행 중");  // 마지막 정상 상태는 그대로
@@ -119,7 +119,7 @@ describe("Sheet", () => {
   });
 
   it("drops the halt line online and opens what an idle run allows", () => {
-    const html = draw(state("idle"));
+    const html = markup(state("idle"));
     expect(html).not.toContain('id="ops-halt"');
     expect(content(html)).toContain("[target] 모드 가상 [wifi] 연결 정상 · 마지막 수신 10:00:00");
     const open = ["ops-start", "ops-reset", "ops-live", "ops-rain-medium", "ops-blockage"];
@@ -133,7 +133,7 @@ describe("Sheet", () => {
   });
 
   it("lets a running round stop but holds start and the source switch", () => {
-    const html = draw(state("running"));
+    const html = markup(state("running"));
     expect(button(html, "ops-stop")).not.toContain('aria-disabled="');
     expect(button(html, "ops-start")).toContain('aria-describedby="ops-why-start"');
     expect(button(html, "ops-live")).toContain('aria-describedby="ops-why-live"');
@@ -141,7 +141,7 @@ describe("Sheet", () => {
   });
 
   it("names the replay controls and leaves only stop and the way back on", () => {
-    const html = draw(state("running", "replay"));
+    const html = markup(state("running", "replay"));
     expect(content(html)).toContain(" 시작 재생 멈춤 초기화 ");
     expect(content(html)).toContain(" 시뮬레이션으로 돌아가기 실측으로 바꾸기 ");
     const on = ["ops-stop", "ops-sim"];
@@ -151,14 +151,14 @@ describe("Sheet", () => {
     for (const id of SERVER.filter((each) => !on.includes(each))) {
       expect(button(html, id)).toContain('aria-disabled="true"');
     }
-    const still = draw(state("stopped", "replay"));
+    const still = markup(state("stopped", "replay"));
     expect(button(still, "ops-stop")).toContain('aria-describedby="ops-why-stop"');
     expect(still).toContain('<li id="ops-why-stop">재생이 멈춰 있습니다</li>');
   });
 
   it("turns every control off and names what is on its way while sending", () => {
-    const quiet = draw(state("idle"));  // 보내기 전
-    const html = draw(state("idle"), ONLINE, { sending: "start" });
+    const quiet = markup(state("idle"));  // 보내기 전
+    const html = markup(state("idle"), ONLINE, { sending: "start" });
     expect(note(html)).toBe("[dots] 시작 보내는 중입니다");
     expect(html).not.toContain('id="ops-halt"');
     for (const id of SERVER) {
@@ -171,16 +171,16 @@ describe("Sheet", () => {
     expect(lines(quiet).length).toBeGreaterThan(1);
     expect(lines(html)).toEqual(lines(quiet));  // 이유 줄이 그대로라 칸 높이가 바뀌지 않음
     const late = delivery("start", { ok: false, fault: REFUSED, at: T });  // 지난 결과
-    const again = draw(state("idle"), ONLINE, { sending: "rain", delivery: late });
+    const again = markup(state("idle"), ONLINE, { sending: "rain", delivery: late });
     expect(note(again)).toBe("[dots] 강우 적용 보내는 중입니다");  // 보내는 동안 지난 결과는 가림
   });
 
   it("opens the confirm line inside the panel of the pressed control", () => {
-    const html = draw(state("running"), ONLINE, { open: "stop" });
+    const html = markup(state("running"), ONLINE, { open: "stop" });
     const round = html.split('<section aria-label="입력원"')[0];  // 회차 칸까지
     expect(round).toContain('role="group" aria-label="종료 확인" data-opener="ops-stop"');
     expect(content(html)).toContain("회차를 종료할까요? 비가 그치고 마지막 상태가 남습니다 예 취소");
-    const source = draw(state("idle"), ONLINE, { open: "live" });
+    const source = markup(state("idle"), ONLINE, { open: "live" });
     expect(source.split('<section aria-label="입력원"')[1]).toContain(
       'role="group" aria-label="실측으로 바꾸기 확인" data-opener="ops-live"',
     );
@@ -202,7 +202,7 @@ describe("Sheet", () => {
       ],
     ];
     for (const [given, text] of cases) {
-      expect(note(draw(state(), ONLINE, { delivery: given }))).toBe(text);
+      expect(note(markup(state(), ONLINE, { delivery: given }))).toBe(text);
     }
   });
 });

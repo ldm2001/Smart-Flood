@@ -15,7 +15,7 @@ const threshold = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 && value <= MAX_THRESHOLD_MM;
 
 // 구역마다 검사해 잘못된 값만 기본값으로 변환
-function filter(input: unknown): Settings {
+function filtering(input: unknown): Settings {
   const source = typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
   const thresholds: Thresholds = { ...DEFAULT_SETTINGS.thresholds };
   for (const id of ZONE_IDS) {
@@ -35,7 +35,7 @@ export function decoding(raw: string | null): Settings {
     return DEFAULT_SETTINGS;
   }
   if (typeof value !== "object" || value === null) return DEFAULT_SETTINGS;
-  return filter((value as { thresholds?: unknown }).thresholds);
+  return filtering((value as { thresholds?: unknown }).thresholds);
 }
 
 // 설정 저장소의 모양
@@ -100,7 +100,7 @@ export function vault(getStorage: () => Storage | null): Store {
     },
     fallback: () => DEFAULT_SETTINGS,
     revision(next) {
-      deposit(JSON.stringify(filter(next.thresholds)));  // 검사한 설정을 글자로 바꿔 저장
+      deposit(JSON.stringify(filtering(next.thresholds)));  // 검사한 설정을 글자로 바꿔 저장
     },
     defaults() {  // 기본값으로 되돌림
       deposit(null);
