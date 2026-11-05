@@ -15,15 +15,15 @@ def test_volts_inverts_the_line():
 # 가짜 센서가 시작 수위에서 초당 ramp 만큼 오르는지 검사
 def test_fake_sensor_ramps_with_the_clock():
     clock = iter([0.0, 0.0, 5.0])
-    read = host.fake(40.0, 2.0, lambda: next(clock))
-    assert read() == pytest.approx(host.volts(40.0))
-    assert read() == pytest.approx(host.volts(50.0))
+    probe = host.fake(40.0, 2.0, lambda: next(clock))
+    assert probe() == pytest.approx(host.volts(40.0))
+    assert probe() == pytest.approx(host.volts(50.0))
 
 
 # 줄 흐름에서 첫 토큰이 숫자인 줄만 mV 로 읽고, 끝나면 마지막 값을 유지하는지 검사
 def test_lines_skip_text_and_keep_the_last_value():
-    read = host.lines(iter(["x", "", "1000", "abc 2", "1100.5\n"]))
-    assert (read(), read(), read()) == (1000.0, 1100.5, 1100.5)
+    probe = host.lines(iter(["x", "", "1000", "abc 2", "1100.5\n"]))
+    assert (probe(), probe(), probe()) == (1000.0, 1100.5, 1100.5)
 
 
 # 아무 숫자도 없이 끝나면 0 mV(센서 이상으로 보냄)인지 검사
@@ -33,8 +33,8 @@ def test_lines_without_numbers_give_zero():
 
 # depth 스케치 출력처럼 mV 앞에 다른 숫자(millis)가 있으면 mV 바로 앞 토큰을 읽는지 검사
 def test_lines_read_the_token_before_mv():
-    read = host.lines(iter(["1500 ms raw 615  482 mV", "1600 ms raw 620  484.5 mV"]))
-    assert (read(), read()) == (482.0, 484.5)
+    probe = host.lines(iter(["1500 ms raw 615  482 mV", "1600 ms raw 620  484.5 mV"]))
+    assert (probe(), probe()) == (482.0, 484.5)
 
 
 # 명령행 선택지와 기본값 검사
@@ -58,9 +58,9 @@ def test_mac_prints_when_there_is_no_server():
     out = io.StringIO()
     clock = iter([10.0, 10.5])
     mac = host.Mac("", lambda: 480.0, clock=lambda: next(clock), out=out)
-    mac.post({"seq": 0})
+    mac.delivery({"seq": 0})
     assert json.loads(out.getvalue()) == {"seq": 0}
-    assert mac.now_ms() == 500
+    assert mac.clock() == 500
 
 
 # 주소는 서버 + /api/ingest 이고, 전송 함수의 예외는 그대로 올려 loop 가 로그를 남기게 하는지 검사
@@ -73,5 +73,5 @@ def test_mac_posts_to_the_ingest_path():
 
     mac = host.Mac("http://h:1", lambda: 480.0, poster=poster)
     with pytest.raises(OSError):
-        mac.post({"seq": 0})
+        mac.delivery({"seq": 0})
     assert calls == [("http://h:1/api/ingest", {"seq": 0}, 0.4)]

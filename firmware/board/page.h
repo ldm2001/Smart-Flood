@@ -36,43 +36,43 @@ a{color:#8fd0ff}
 <div class="card"><div class="row">
 <div class="kv"><span>펌프</span><b id="pump">-</b></div><div class="kv"><span>모드</span><b id="mode">-</b></div>
 <div class="kv"><span>경과</span><b id="el">-</b></div><div class="kv"><span>급수통</span><b id="flt">-</b></div></div>
-<button onclick="c('start')">새 실험 + 강우 시작</button><button onclick="c('rain')">강우 재개</button>
-<button onclick="c('manual')">펌프 수동 ON</button><button class="stop" onclick="c('stop')">정지</button></div>
+<button onclick="cmd('start')">새 실험 + 강우 시작</button><button onclick="cmd('rain')">강우 재개</button>
+<button onclick="cmd('manual')">펌프 수동 ON</button><button class="stop" onclick="cmd('stop')">정지</button></div>
 <div class="card"><b>한계 수위와 경보 (mm, 어항 바닥 = 0)</b><br>
 <label>A 낮은 상가 도로 <input id="z0"></label><label>B 주택 골목 <input id="z1"></label><label>C 높은 광장 <input id="z2"></label>
 <label>안전 최대 <input id="maxLevel"></label><br>
 <label>주의(초 이내) <input id="cautionEta"></label><label>경계(초 이내) <input id="warningEta"></label><br>
 <label>강우 ON(초) <input id="rainOnS"></label><label>강우 OFF(초) <input id="rainOffS"></label><br>
-<button onclick="save()">저장</button></div>
+<button onclick="settings()">저장</button></div>
 <div class="card"><b>보정</b><br>
 <small>① 수위: 자로 잰 실제 수위를 넣고 낮은 수위에서 1번, 높은 수위에서 2번. 센서 전압 <span id="mv">-</span> mV</small><br>
-<label>실제 수위 <input id="calmm"> mm</label><button onclick="c('cal1','calmm')">보정점 1</button><button onclick="c('cal2','calmm')">보정점 2</button><button onclick="c('calreset')">초기화</button><br>
+<label>실제 수위 <input id="calmm"> mm</label><button onclick="cmd('cal1','calmm')">보정점 1</button><button onclick="cmd('cal2','calmm')">보정점 2</button><button onclick="cmd('calreset')">초기화</button><br>
 <small>② 유량: 호스 끝을 계량컵에 넣고 버튼 → 30초 뒤 받은 양 입력. 현재 <span id="flow">-</span> mL/s</small><br>
-<button onclick="c('flowtest')">펌프 30초 돌리기</button><label>받은 양 <input id="flowml"> mL</label><button onclick="c('flowset','flowml')">유량 저장</button><br>
-<small>③ 수면 면적: 현재 <span id="area">-</span> cm², 이번 회차 추정 <span id="areaEst">-</span> cm²</small> <button onclick="c('areaapply')">추정값 적용</button></div>
+<button onclick="cmd('flowtest')">펌프 30초 돌리기</button><label>받은 양 <input id="flowml"> mL</label><button onclick="cmd('flowset','flowml')">유량 저장</button><br>
+<small>③ 수면 면적: 현재 <span id="area">-</span> cm², 이번 회차 추정 <span id="areaEst">-</span> cm²</small> <button onclick="cmd('areaapply')">추정값 적용</button></div>
 </main><script>
 const MODES=['정지','수동','강우','유량측정'],ST=['정상','주의','경계','침수(경보)'],ZN=['A 낮은 상가 도로','B 주택 골목','C 높은 광장'];
-const q=i=>document.getElementById(i);let loaded=false,last=null;
-async function c(cmd,id){let u='/api/cmd?c='+cmd;if(id)u+='&v='+encodeURIComponent(q(id).value);await fetch(u);loaded=false;tick()}
-async function save(){const k=['z0','z1','z2','maxLevel','cautionEta','warningEta','rainOnS','rainOffS'];
- await fetch('/api/set?'+k.map(x=>x+'='+encodeURIComponent(q(x).value)).join('&'));loaded=false;tick()}
-function fs(s){return s<0?'-':Math.round(s)+'초'}
-function draw(d,h){const cv=q('cv'),g=cv.getContext('2d'),W=cv.width,H=cv.height;g.clearRect(0,0,W,H);
+const node=i=>document.getElementById(i);let loaded=false,last=null;
+async function cmd(name,id){let u='/api/cmd?c='+name;if(id)u+='&v='+encodeURIComponent(node(id).value);await fetch(u);loaded=false;tick()}
+async function settings(){const k=['z0','z1','z2','maxLevel','cautionEta','warningEta','rainOnS','rainOffS'];
+ await fetch('/api/set?'+k.map(x=>x+'='+encodeURIComponent(node(x).value)).join('&'));loaded=false;tick()}
+function seconds(s){return s<0?'-':Math.round(s)+'초'}
+function chart(d,h){const cv=node('cv'),g=cv.getContext('2d'),W=cv.width,H=cv.height;g.clearRect(0,0,W,H);
  const top=Math.max(d.cfg.zs[2]+10,d.level+10),y=v=>H-8-(v/top)*(H-16),n=120,x=i=>i/(n+30)*W;
  g.font='12px sans-serif';d.cfg.zs.forEach((z,i)=>{g.strokeStyle=['#ffb347','#ff7043','#ff4f6d'][i];g.beginPath();g.moveTo(0,y(z));g.lineTo(W,y(z));g.stroke();g.fillStyle=g.strokeStyle;g.fillText(ZN[i]+' '+z+'mm',4,y(z)-3)});
  g.strokeStyle='#fff';g.lineWidth=2;g.beginPath();const off=n-h.length;h.forEach((v,i)=>{i?g.lineTo(x(off+i),y(v)):g.moveTo(x(off+i),y(v))});g.stroke();
  g.setLineDash([5,4]);g.strokeStyle='#8fd0ff';g.beginPath();g.moveTo(x(n-1),y(d.level));g.lineTo(x(n+29),y(d.level+d.rate*30));g.stroke();g.setLineDash([]);g.lineWidth=1}
 async function tick(){try{const d=await (await fetch('/api/status')).json();
- q('lv').textContent=d.level.toFixed(0)+' mm';q('rate').textContent=(d.rate*60).toFixed(1)+' mm/분';q('rsrc').textContent=d.rsrc;
- q('pred').textContent=d.pred.map(v=>v.toFixed(0)).join(' / ')+' mm';q('route').textContent=d.fault?'수위센서 이상: 12V와 배선을 확인하세요':d.route;
- q('why').textContent=d.why?('정지 사유: '+d.why):'';
- q('zones').innerHTML=d.zones.map((z,i)=>`<div class="zone s${z.stage}"><h3>${ZN[i]} · ${ST[z.stage]}</h3>한계 ${d.cfg.zs[i]} mm<br>${z.eta==0?'침수됨':(z.eta<0?'상승 없음':'침수까지 '+Math.round(z.eta)+'초')}</div>`).join('');
- q('lead').innerHTML=d.zones.map((z,i)=>`<tr><td>${ZN[i]}</td><td>${fs(z.alertT)}</td><td>${fs(z.floodT)}</td><td>${z.alertT>=0&&z.floodT>=0?Math.round(z.floodT-z.alertT)+'초 전':'-'}</td></tr>`).join('');
- q('pump').textContent=d.pump?'ON':'OFF';q('mode').textContent=MODES[d.mode];q('el').textContent=Math.round(d.elapsed)+'초';
- q('flt').textContent=d.floatLow?'물 부족':'정상';q('mv').textContent=d.mv.toFixed(0);q('flow').textContent=d.cfg.flow.toFixed(1);
- q('area').textContent=d.cfg.area.toFixed(0);q('areaEst').textContent=d.areaEst>0?d.areaEst.toFixed(0):'-';
- if(!loaded){['maxLevel','cautionEta','warningEta','rainOnS','rainOffS'].forEach(k=>q(k).value=d.cfg[k]);d.cfg.zs.forEach((z,i)=>q('z'+i).value=z);loaded=true}
- const h=await (await fetch('/api/hist')).json();draw(d,h);
-}catch(e){q('route').textContent='ESP32 연결 끊김'}}
+ node('lv').textContent=d.level.toFixed(0)+' mm';node('rate').textContent=(d.rate*60).toFixed(1)+' mm/분';node('rsrc').textContent=d.rsrc;
+ node('pred').textContent=d.pred.map(v=>v.toFixed(0)).join(' / ')+' mm';node('route').textContent=d.fault?'수위센서 이상: 12V와 배선을 확인하세요':d.route;
+ node('why').textContent=d.why?('정지 사유: '+d.why):'';
+ node('zones').innerHTML=d.zones.map((z,i)=>`<div class="zone s${z.stage}"><h3>${ZN[i]} · ${ST[z.stage]}</h3>한계 ${d.cfg.zs[i]} mm<br>${z.eta==0?'침수됨':(z.eta<0?'상승 없음':'침수까지 '+Math.round(z.eta)+'초')}</div>`).join('');
+ node('lead').innerHTML=d.zones.map((z,i)=>`<tr><td>${ZN[i]}</td><td>${seconds(z.alertT)}</td><td>${seconds(z.floodT)}</td><td>${z.alertT>=0&&z.floodT>=0?Math.round(z.floodT-z.alertT)+'초 전':'-'}</td></tr>`).join('');
+ node('pump').textContent=d.pump?'ON':'OFF';node('mode').textContent=MODES[d.mode];node('el').textContent=Math.round(d.elapsed)+'초';
+ node('flt').textContent=d.floatLow?'물 부족':'정상';node('mv').textContent=d.mv.toFixed(0);node('flow').textContent=d.cfg.flow.toFixed(1);
+ node('area').textContent=d.cfg.area.toFixed(0);node('areaEst').textContent=d.areaEst>0?d.areaEst.toFixed(0):'-';
+ if(!loaded){['maxLevel','cautionEta','warningEta','rainOnS','rainOffS'].forEach(k=>node(k).value=d.cfg[k]);d.cfg.zs.forEach((z,i)=>node('z'+i).value=z);loaded=true}
+ const h=await (await fetch('/api/hist')).json();chart(d,h);
+}catch(e){node('route').textContent='ESP32 연결 끊김'}}
 setInterval(tick,1000);tick();
 </script></body></html>)HTML";

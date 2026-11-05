@@ -6,7 +6,7 @@ import time
 import types
 
 # main.py(보드 층)를 CPython 에서 돌리는 시험. machine·network·secret 을 가짜 모듈로 끼우고
-# time.ticks_*·sleep_ms 는 가짜 시계로 바꿈. 전송은 client.send 를 기록 함수로 바꿔 받음
+# time.ticks_*·sleep_ms 는 가짜 시계로 바꿈. 전송은 client.delivery 를 기록 함수로 바꿔 받음
 
 
 # 가짜 핀: 설정만 기록하고, 출력(value)이 불리면 실패
@@ -82,12 +82,12 @@ class WLAN:
         return ("192.168.4.2", "255.255.255.0", "192.168.4.1", "8.8.8.8")
 
 
-# 가짜 시계(ms). sleep_ms 가 더함
+# 가짜 시계(ms). pause 가 더함
 class Clock:
     def __init__(self):
         self.ms = 0
 
-    def sleep_ms(self, ms):
+    def pause(self, ms):
         self.ms += ms
 
 
@@ -105,21 +105,23 @@ def board(monkeypatch):
     monkeypatch.setattr(time, "ticks_ms", lambda: clock.ms, raising=False)
     monkeypatch.setattr(time, "ticks_diff", lambda a, b: a - b, raising=False)
     monkeypatch.setattr(time, "ticks_add", lambda t, ms: t + ms, raising=False)
-    monkeypatch.setattr(time, "sleep_ms", clock.sleep_ms, raising=False)
+    monkeypatch.setattr(time, "sleep_ms", clock.pause, raising=False)
     monkeypatch.setitem(sys.modules, "machine", machine)
     monkeypatch.setitem(sys.modules, "network", network)
     monkeypatch.setitem(sys.modules, "secret", secret)
     monkeypatch.delitem(sys.modules, "main", raising=False)
     main = importlib.import_module("main")
     sent = []
-    monkeypatch.setattr(main.client, "send", lambda url, body, timeout_s: sent.append((url, body)))
+    monkeypatch.setattr(
+        main.client, "delivery", lambda url, body, timeout_s: sent.append((url, body))
+    )
     return types.SimpleNamespace(main=main, secret=secret, sent=sent)
 
 
 # 서버 전송 3회: 끝 슬래시를 뗀 주소 + /api/ingest 로 seq 0·1·2, 릴레이·플로트 핀은 입력,
 # 핀 출력 없음, 감시 타이머 8초가 표본마다 먹여지는지 검사
 def test_run_sends_to_the_server_without_touching_the_pump(board):
-    board.main.run(cycles=3)
+    board.main.startup(cycles=3)
     assert [(url, body["seq"], body["readings"]["distA_mm"]) for url, body in board.sent] == [
         ("http://h:1/api/ingest", 0, 560.0),
         ("http://h:1/api/ingest", 1, 560.0),
@@ -134,7 +136,7 @@ def test_run_sends_to_the_server_without_touching_the_pump(board):
 @pytest.mark.parametrize("error", [None, OSError("Wifi Invalid Password")])
 def test_run_keeps_the_server_when_wifi_fails_at_boot(board, capsys, error):
     WLAN.error, WLAN.stuck = error, error is None
-    board.main.run(cycles=2)
+    board.main.startup(cycles=2)
     out = capsys.readouterr().out.splitlines()
     assert board.sent == [] and [w.timeout for w in WDT.made] == [8000]
     assert "wifi" in out[0]
@@ -144,7 +146,7 @@ def test_run_keeps_the_server_when_wifi_fails_at_boot(board, capsys, error):
 # 부팅 때 못 붙었어도 보낼 때 다시 붙어 그다음 전송부터 서버로 보내고, 붙은 IP 를 찍는지 검사
 def test_run_rejoins_after_a_failed_boot(board, capsys):
     WLAN.late = 1
-    board.main.run(cycles=3)
+    board.main.startup(cycles=3)
     out = capsys.readouterr().out.splitlines()
     assert [body["seq"] for _, body in board.sent] == [1, 2]
     assert "전송 실패 seq 0: 와이파이 끊김" in out and "wifi 192.168.4.2" in out
@@ -152,13 +154,13 @@ def test_run_rejoins_after_a_failed_boot(board, capsys):
 
 # 도는 중에 와이파이가 끊기면 그 전송은 실패로 알리고, 다시 붙은 뒤 IP 를 찍고 이어 보내는지 검사
 def test_run_rejoins_after_a_drop(board, capsys, monkeypatch):
-    def once(url, body, timeout_s):
+    def dropout(url, body, timeout_s):
         board.sent.append((url, body))
         if body["seq"] == 0:
             WLAN.up = False  # 첫 전송 뒤 끊김
 
-    monkeypatch.setattr(board.main.client, "send", once)
-    board.main.run(cycles=3)
+    monkeypatch.setattr(board.main.client, "delivery", dropout)
+    board.main.startup(cycles=3)
     out = capsys.readouterr().out.splitlines()
     assert [body["seq"] for _, body in board.sent] == [0, 2]
     assert "전송 실패 seq 1: 와이파이 끊김" in out
@@ -168,14 +170,14 @@ def test_run_rejoins_after_a_drop(board, capsys, monkeypatch):
 # 계속 못 붙으면 다시 붙기를 10초에 한 번만 시도하는지 검사
 def test_rejoin_waits_ten_seconds_between_tries(board):
     WLAN.stuck = True
-    board.main.run(cycles=12)
+    board.main.startup(cycles=12)
     assert WLAN.joins == 3  # 부팅 때 1번, 16초와 26초의 전송 때 1번씩
 
 
 # SERVER_URL 에 http:// 가 없으면 부팅 때 알리고 서버 없이 도는지 검사
 def test_bad_server_url_is_reported_at_boot(board, capsys):
     board.secret.SERVER_URL = "h:1"
-    board.main.run(cycles=1)
+    board.main.startup(cycles=1)
     out = capsys.readouterr().out
     assert board.sent == [] and "SERVER_URL" in out
     assert json.loads(out.splitlines()[-1])["seq"] == 0

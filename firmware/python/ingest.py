@@ -7,7 +7,7 @@ PATH = "/api/ingest"  # 서버 주소 뒤에 붙는 경로
 
 
 # 부팅 ID: 무작위 바이트의 16진 글자
-def boot_id(raw):
+def bootid(raw):
     return binascii.hexlify(raw).decode()
 
 

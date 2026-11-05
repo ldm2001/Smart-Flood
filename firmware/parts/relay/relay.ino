@@ -1,7 +1,7 @@
 const int RLY = 26;  // 릴레이 IN. VCC 5V, GND 공통. 12 V 는 COM·NO 접점에만
-bool on = false;     // board.ino 와 같은 구동: 켬은 OUTPUT LOW, 끔은 입력(고임피던스)
+bool on = false;
 
-// 릴레이 켬·끔. 끌 때 핀을 입력으로 풀어 모듈 풀업이 끄게 함(board.ino 의 RELAY_OFF_HIGHZ)
+// 릴레이 켬·끔. 켤 때 OUTPUT LOW, 끌 때 입력으로 풀어 모듈 풀업이 끄게 함(board.ino 와 같음)
 void relay(bool v) {
   if (v) {
     digitalWrite(RLY, LOW);

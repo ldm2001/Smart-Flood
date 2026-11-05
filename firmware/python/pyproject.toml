@@ -1,5 +1,5 @@
 # 공용 모듈(level·ingest·client·node)은 MicroPython 에서도 돌아야 하므로
-# f-string·typing·dataclass 를 쓰지 않는다. main.py 는 보드 전용, host.py 는 맥 전용
+# f-string·typing·dataclass 를 쓰지 않음. main.py 는 보드 전용, host.py 는 맥 전용
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

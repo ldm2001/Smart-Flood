@@ -61,7 +61,7 @@ def test_point2_needs_point1_and_a_voltage_gap():
 
 # 보정 초기화는 이론 직선으로 돌아가는지 검사
 def test_reset_returns_the_theory_line():
-    line = level.Line().point1(500.0, 0.0).reset()
+    line = level.Line().point1(500.0, 0.0).theory()
     theory = level.Line()
     assert (line.slope, line.offset, line.point) == (theory.slope, theory.offset, None)
 
