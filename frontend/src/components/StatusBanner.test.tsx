@@ -2,28 +2,38 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Headline } from "./StatusBanner";
 
-// 태그를 지우고 글자만 남기는 도우미
-const content = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+// 아이콘 SVG 를 [이름] 글로 바꾸고 태그를 빼 공백을 하나로 줄여 글만 남기는 도우미
+const content = (html: string) =>
+  html
+    .replace(/<svg[^>]*data-icon="([^"]+)"[^>]*>[\s\S]*?<\/svg>/g, " [$1] ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ");
 
-describe("Headline", () => {  // 머리글 테스트 묶음
-  // 단계 아이콘·이름·문구를 보여 주는지 검사
+describe("Headline", () => {
   it("shows the stage with its icon, label and message", () => {
-    const html = renderToStaticMarkup(  // 경계 단계 배너를 그린다
-      // 경계 단계, A 구역, 도달 문구를 가진 배너
+    const html = renderToStaticMarkup(
       <Headline banner={{ stage: "warning", zoneId: "A", message: "A 낮은 상가 도로 · 약 10초 후 침수 예상" }} />,
     );
-    // 구획에 낭독 속성과 단계 속성이 붙어야 함
     expect(html).toMatch(/^<section aria-live="polite" data-stage="warning"/);
-    // 아이콘, 단계 이름, 문구가 차례로 보여야 함
-    expect(content(html)).toContain("▲ 경계 A 낮은 상가 도로 · 약 10초 후 침수 예상");
+    expect(content(html)).toContain("[triangle] 경계 A 낮은 상가 도로 · 약 10초 후 침수 예상");
+  });
+
+  // 서버 alerts 로 만든 대피 안내 한 줄을 보이는지 검사
+  it("shows the evacuation guidance line", () => {
+    const html = renderToStaticMarkup(
+      <Headline
+        banner={{ stage: "warning", zoneId: "B", message: "B 주택 골목 · 침수 위험" }}
+        guide="B 주택 골목 위험: C 높은 광장으로 대피하세요"
+      />,
+    );
+    expect(content(html)).toContain("B 주택 골목 · 침수 위험 B 주택 골목 위험: C 높은 광장으로 대피하세요");
   });
 
   // 자료가 오기 전에는 중립 문구로 기다리는지 검사
   it("waits with a neutral message before there is data", () => {
-    const html = renderToStaticMarkup(<Headline banner={null} />);  // 배너 없이 그린다
-    expect(html).toMatch(/^<section aria-live="polite"/);  // 낭독 속성은 있어야 함
-    expect(html).not.toContain("data-stage");  // 단계 속성은 없어야 함
-    // 자료 대기 문구가 보여야 함
-    expect(content(html)).toContain("자료 대기 수위 자료를 기다리는 중입니다");
+    const html = renderToStaticMarkup(<Headline banner={null} />);
+    expect(html).toMatch(/^<section aria-live="polite"/);
+    expect(html).not.toContain("data-stage");
+    expect(content(html)).toContain("[dots] 자료 대기 수위 자료를 기다리는 중입니다");
   });
 });
