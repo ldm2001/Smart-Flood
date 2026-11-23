@@ -154,6 +154,21 @@ export function expiry(nowMs: number, basisMs: number, validForSec: number): boo
   return nowMs - basisMs > validForSec * 1000;
 }
 
+// 응답의 예측 만료 여부. 재생은 (지금 - 받은 시각) + (timestamp - 기준 시각)으로 계산
+export function lapse(
+  nowMs: number,
+  state: Pick<Snapshot, "mode" | "timestamp" | "predictionMeta">,
+  receivedAt: number | null,  // 응답을 받은 시각(ms). 모르면(mock) null 이고 지금을 그대로 씀
+): boolean {
+  const meta = state.predictionMeta;
+  if (!meta) return false;  // 예측 기준 정보가 없으면 만료 표시 없음
+  const moment =  // 기준 시각과 견줄 지금. 재생은 기록 위의 지금(timestamp + 받은 뒤 지난 시간)
+    state.mode === "replay" && receivedAt !== null
+      ? Date.parse(state.timestamp) + (nowMs - receivedAt)
+      : nowMs;
+  return expiry(moment, Date.parse(meta.basisTime), meta.validForSec);
+}
+
 // 연결 끊김 여부: 마지막 정상 수신 뒤 4초가 넘었거나 한 번도 못 받았으면 끊김
 export function outage(nowMs: number, lastOkMs: number | null): boolean {
   return lastOkMs === null || nowMs - lastOkMs > DISCONNECT_AFTER_MS;
