@@ -198,10 +198,9 @@ class Experiment:
         return replace(snapshot, notifier=self.alarm())  # 무장은 tick 사이에도 바뀜
 
     @property
-    # 판정 기준 입력원. 재생이면 기록한 입력원(모르면 replay), 아니면 지금 입력원
-    def basis(self) -> str:
-        recorded = None if self._replay is None else self._replay.data_source
-        return self._data_source if recorded is None else recorded
+    # 판정 기준 입력원. 재생이면 기록한 입력원(모르면 None 이라 모델 판정), 아니면 지금 입력원
+    def basis(self) -> str | None:
+        return self._data_source if self._replay is None else self._replay.data_source
 
     @property
     # 모델 상태

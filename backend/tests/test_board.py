@@ -284,6 +284,21 @@ def test_a_board_log_without_a_known_source_replays_as_before(
     assert rules == {ASSUMPTION_RULE}  # 실측 추세 예측이 한 번도 없음
 
 
+@pytest.mark.parametrize("edit", SOURCE_EDITS.values(), ids=SOURCE_EDITS.keys())
+# 실측 판정 입력원에 replay 를 넣어도 dataSource 가 없거나 모르는 기록은 모델로 판정하는지 검사
+def test_an_unknown_source_log_ignores_a_listed_replay(builder, clock, config, journal, edit):
+    cfg = copy.deepcopy(config)
+    cfg["alerts"]["measured_sources"] = ["live", "replay"]
+    client = builder(cfg)
+    service = client.app.state.service
+    log_id = tide(client, clock, service, cfg)
+    label(journal, log_id, lambda meta: {**meta, "dataSource": "sim"})
+    model = footage(client, clock, log_id)  # 모델 판정의 재생
+    label(journal, log_id, edit)
+    assert footage(client, clock, log_id) == model
+    assert service.basis is None  # 기록한 입력원을 모름
+
+
 # 보드 회차 재생을 떠나 sim 으로 돌아가면 판정 기준도 지금 입력원으로 돌아오는지 검사
 def test_leaving_a_board_replay_returns_to_the_current_source(builder, clock, config):
     client = builder(source=Script(readout(config, a_mm=30.0, b_mm=10.0)))
