@@ -13,6 +13,7 @@ from pydantic import ValidationError
 COMMAND_KINDS = ("start", "rain", "blockage", "stop", "reset")
 ENDING_KINDS = ("stop", "reset")
 TIMED_TYPES = ("cmd", "obs", "state")  # 경과 초가 줄지 않는 줄. 나머지(event 등)는 건너뜀
+RECORDED_SOURCES = ("sim", "live")  # meta 에 적히는 입력원. 재생은 기록을 쓰지 않음
 
 
 @dataclass(frozen=True)
@@ -60,7 +61,7 @@ class Replay:
         self._observations = observations
         self.origin()
 
-    # 첫 줄(meta)을 읽어 실험 ID 와 시작 시각을 얻음
+    # 첫 줄(meta)을 읽어 실험 ID, 시작 시각, 기록한 입력원을 얻음
     def meta(self, record: dict) -> None:
         if record.get("type") != "meta":
             raise defect(1, "첫 줄이 meta 가 아니다")
@@ -81,8 +82,10 @@ class Replay:
             moment = parsed.astimezone(KST)
         except OverflowError:  # 바꿀 수 없을 만큼 이르거나 늦으면
             raise defect(1, f"startTime 을 KST 로 바꿀 수 없다: {start_time!r}") from None
+        source = record.get("dataSource")  # 기록한 입력원. 오류로 보지 않음
         self.experiment_id = experiment_id
         self.start_time = moment
+        self.data_source = source if source in RECORDED_SOURCES else None  # 없거나 모르면 None
 
     # 기록의 처음으로 돌아감
     def origin(self) -> None:

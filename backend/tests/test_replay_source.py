@@ -101,6 +101,30 @@ def test_meta_gives_the_id_and_the_start_time_in_kst():
     assert replay.start_time.utcoffset() == timedelta(hours=9)  # 오프셋은 한국(+9 시간)이어야 함
 
 
+@pytest.mark.parametrize("source", ["sim", "live"])
+# meta 의 dataSource 가 기록하는 입력원(sim·live)이면 기록한 입력원으로 주는지 검사
+def test_meta_gives_the_recorded_source(source):
+    assert Replay([meta(dataSource=source), START_CMD]).data_source == source
+
+
+ODD_SOURCES = {  # 기록한 입력원으로 읽을 수 없는 meta 줄(이름 → meta 줄)
+    "missing": {k: v for k, v in meta().items() if k != "dataSource"},
+    "unknown": meta(dataSource="board"),
+    "replay": meta(dataSource="replay"),  # 재생은 기록을 쓰지 않음
+    "upper-case": meta(dataSource="LIVE"),
+    "null": meta(dataSource=None),
+    "number": meta(dataSource=1),
+    "list": meta(dataSource=["live"]),
+    "object": meta(dataSource={"live": True}),
+}
+
+
+@pytest.mark.parametrize("record", ODD_SOURCES.values(), ids=ODD_SOURCES.keys())
+# dataSource 가 없거나 모르는 값이어도 오류 없이 읽고 기록한 입력원은 None 인지 검사
+def test_meta_without_a_known_source_gives_none(record):
+    assert Replay([record, START_CMD]).data_source is None
+
+
 @pytest.mark.parametrize(
     ("tail", "end_s"),  # (뒤에 붙는 줄, 기대 끝 초) 이름
     [

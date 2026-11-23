@@ -1,10 +1,23 @@
 import copy
+import json
 import pytest
 from app.core.predictor import ASSUMPTION_RULE, TREND_RULE
-from tests.helpers import breakage, lapse
+from tests.helpers import Mailbox, Script, breakage, chronicle, footage, lapse, readout, revision
 from tests.test_check06_devices import message
+from tests.test_replay import tapes
 
 START = "/api/experiment/start"
+ROSTER = {  # 시뮬레이션·재생의 장치 상태(늘 연결·정상)
+    "esp32_1": "online",
+    "esp32_2": "online",
+    "floatSwitch": "normal",
+    "emergencyStop": "normal",
+}
+SOURCE_EDITS = {  # meta 의 dataSource 를 고치는 방법(이름 → meta 를 받아 고친 meta)
+    "missing": lambda meta: {k: v for k, v in meta.items() if k != "dataSource"},
+    "unknown": lambda meta: {**meta, "dataSource": "board"},
+    "not-text": lambda meta: {**meta, "dataSource": 1},
+}
 
 
 # 보드 메시지 하나(running 은 보드 회차가 열려 있는지)
@@ -191,3 +204,98 @@ def test_live_needs_five_samples_before_the_slope_counts(client, clock, service,
     lapse(clock, service, 1)
     stages = {a["zone"]: a["stage"] for a in client.get("/api/state").json()["alerts"]}
     assert stages["A"] == "warning"  # 표본 5 개부터 기울기를 씀
+
+
+# 보드 회차 하나를 기록하고 실험 ID 를 돌려줌
+# A 를 45 mm 까지 올리고 0 mm 로 20 초, 메시지 없이 gap 초 뒤 보드 정지
+def tide(client, clock, service, config, gap: int = 0) -> str:
+    ramp(client, clock, service, config, 45)  # 첫 메시지가 회차를 엶(seq 1~46)
+    for seq in range(47, 67):  # 0 mm 로 20 초
+        client.post("/api/ingest", json=board(config, seq, True, a_mm=0.0))
+        lapse(clock, service, 1)
+    lapse(clock, service, gap)
+    client.post("/api/ingest", json=board(config, 67, False))  # 보드 정지가 회차를 닫음
+    return client.get("/api/state").json()["experimentId"]
+
+
+# 보드 회차 state 줄이 재생에서 보일 모양. 입력원 표시·품질·장치만 다름
+def replica(state: dict) -> dict:
+    zones = {
+        z: {**zone, "source": "replay" if zone["source"] == "measured" else zone["source"]}
+        for z, zone in state["zones"].items()
+    }
+    marks = {"mode": "replay", "dataSource": "replay", "quality": "valid", "devices": ROSTER}
+    return {**state, **marks, "zones": zones}
+
+
+# 기록의 meta 줄(첫 줄)을 edit 결과로 바꿈
+def label(journal, log_id: str, edit) -> None:
+    revision(journal, lambda records: [edit(records[0]), *records[1:]], log_id)
+
+
+# 보드 회차 기록을 재생하면 경보가 tick 마다 기록의 state 줄과 같은지 검사
+# 실측 수위로 단계가 오르고, 수위가 0 으로 내려가도 회차 동안 단계가 남아야 함
+def test_a_board_run_replays_with_its_recorded_alerts(client, clock, service, config, journal):
+    log_id = tide(client, clock, service, config)
+    states = chronicle(journal, log_id)
+    last = {a["zone"]: a["stage"] for a in states[-1]["alerts"]}
+    assert states[-1]["zones"]["A"]["levelMm"] == pytest.approx(0.0, abs=0.01)
+    assert last["A"] == "evacuate"  # 0 mm 에서도 침수가 남음
+    recorded = [s["alerts"] for s in states]
+    replayed = [json.loads(body)["alerts"] for body in footage(client, clock, log_id)]
+    assert replayed == [[], *recorded, recorded[-1]]  # 0 초, tick 마다, 기록 끝에서 멈춘 상태
+
+
+# 보드 회차 재생도 재생 표시(입력원·구역 출처 replay, 품질 valid, 시뮬레이션 장치)는 그대로이고
+# 나머지는 기록과 같으며, 기록을 쓰지 않고 알리지도 않는지 검사
+def test_a_board_run_replay_keeps_the_replay_marks(builder, clock, config, journal):
+    mailbox = Mailbox()
+    client = builder(notifier=mailbox)
+    service = client.app.state.service
+    log_id = tide(client, clock, service, config, gap=5)  # 끊긴 5 초에 degraded·offline 이 남음
+    ended, states = client.get("/api/state").json(), chronicle(journal, log_id)
+    assert {s["quality"] for s in states} == {"valid", "degraded"}
+    assert {s["devices"]["esp32_1"] for s in states} == {"online", "offline"}
+    assert "measured" in {s["zones"]["A"]["source"] for s in states}
+    sent, files = list(mailbox.events), tapes(journal)
+    assert sent  # 기록할 때는 단계 전환을 알림
+    bodies = [json.loads(body) for body in footage(client, clock, log_id)]
+    assert bodies[1:] == [*map(replica, states), replica(ended)]
+    assert {(b["mode"], b["dataSource"], b["quality"]) for b in bodies} == {
+        ("replay", "replay", "valid")
+    }
+    assert all(b["devices"] == ROSTER for b in bodies)
+    assert tapes(journal) == files and mailbox.events == sent
+
+
+@pytest.mark.parametrize("edit", SOURCE_EDITS.values(), ids=SOURCE_EDITS.keys())
+# meta 의 dataSource 가 없거나 모르는 값이면 보드 회차 기록도 전처럼 모델로 판정해 재생하는지 검사
+# 전에는 모든 재생이 모델 판정이었고, sim 기록의 재생은 지금도 그러함
+def test_a_board_log_without_a_known_source_replays_as_before(
+    client, clock, service, config, journal, edit
+):
+    log_id = tide(client, clock, service, config)
+    label(journal, log_id, lambda meta: {**meta, "dataSource": "sim"})
+    model = footage(client, clock, log_id)  # 모델 판정의 재생
+    label(journal, log_id, edit)
+    bodies = footage(client, clock, log_id)
+    assert bodies == model
+    rules = {json.loads(body)["predictionMeta"]["assumptions"]["rule"] for body in bodies}
+    assert rules == {ASSUMPTION_RULE}  # 실측 추세 예측이 한 번도 없음
+
+
+# 보드 회차 재생을 떠나 sim 으로 돌아가면 판정 기준도 지금 입력원으로 돌아오는지 검사
+def test_leaving_a_board_replay_returns_to_the_current_source(builder, clock, config):
+    client = builder(source=Script(readout(config, a_mm=30.0, b_mm=10.0)))
+    service = client.app.state.service
+    log_id = tide(client, clock, service, config)
+    assert service.basis == "live"
+    footage(client, clock, log_id)
+    assert service.basis == "live"  # 재생 중에는 기록한 입력원
+    client.post("/api/source", json={"mode": "sim"})
+    assert service.basis == "sim"
+    client.post(START, json={})
+    lapse(clock, service, 6)  # A·B 관측이 tick 마다 들어옴
+    body = client.get("/api/state").json()
+    assert (body["dataSource"], body["runState"]) == ("sim", "running")
+    assert body["predictionMeta"]["assumptions"]["rule"] == ASSUMPTION_RULE  # 모델 판정

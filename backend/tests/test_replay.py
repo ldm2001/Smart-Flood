@@ -1,10 +1,13 @@
+import json
 import math
 import pytest
 from app.core.model import Underflow
+from app.core.predictor import ASSUMPTION_RULE
 from tests.helpers import (
     Script,
     chronicle,
     echo,
+    footage,
     lapse,
     readout,
     revision,
@@ -89,6 +92,23 @@ def test_readings_logged_as_text_replay_as_the_same_numbers(
         body = client.get("/api/state").json()
         assert body == echo(expected)
         assert [body["zones"][z]["source"] for z in "AB"] == ["estimated", "replay"]
+
+
+# sim 회차 기록은 A·B 관측이 tick 마다 있어도 전처럼 모델로 판정해 재생하는지 검사
+# 실측 판정이면 예측이 실측 추세(TREND_RULE)로 바뀜
+def test_a_sim_run_still_replays_with_the_model_judgement(builder, clock, journal, config):
+    client = builder(source=Script(readout(config, a_mm=30.0, b_mm=10.0)))
+    service = client.app.state.service
+    answer(client, START_URL)
+    lapse(clock, service, 10)
+    answer(client, STOP_URL)
+    states = chronicle(journal, ID)
+    assert [s["zones"]["A"]["source"] for s in states] == ["simulated"] * 10
+    bodies = footage(client, clock, ID)
+    replayed = [json.loads(body) for body in bodies]
+    assert replayed[1:-1] == [echo(s) for s in states]
+    rules = {s["predictionMeta"]["assumptions"]["rule"] for s in replayed}
+    assert rules == {ASSUMPTION_RULE}
 
 
 
