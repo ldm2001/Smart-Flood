@@ -55,7 +55,7 @@ echo 'NEXT_PUBLIC_API_BASE=http://localhost:8000' > .env.development.local
 
 ## AGENTS.md 를 만들지 않는 이유
 
-`next dev` 는 AI 코딩 에이전트가 실행했다고 판단하면 `AGENTS.md` 를 만들거나 고친다. 이 저장소의 작업 규칙은 루트 `CLAUDE.md` 에 두므로 `next.config.mjs` 에서 `agentRules: false` 로 끈다.
+`next dev` 가 `AGENTS.md` 를 만들거나 고치지 않도록 `next.config.mjs` 에서 `agentRules: false` 로 끈다.
 
 ## 구조
 
@@ -157,7 +157,7 @@ postbuild 검사는 6번 외에 세 가지를 더 본다. 세 화면 모두에 �
 
 ## 개발 규칙
 
-루트 `CLAUDE.md` 의 frontend 절을 따른다. 계산할 수 있는 값은 state 로 두지 않고 렌더 중에 계산한다. 시간은 `useNow()` 로만 읽는다. 상태 관리 라이브러리, UI 키트, 차트 라이브러리, `next/image`, 동적 라우트, 서버 기능은 쓰지 않는다.
+계산할 수 있는 값은 state 로 두지 않고 렌더 중에 계산한다. 시간은 `useNow()` 로만 읽는다. 상태 관리 라이브러리, UI 키트, 차트 라이브러리, `next/image`, 동적 라우트, 서버 기능은 쓰지 않는다.
 
 핵심 수치(지시서 6장: 28px 이상)는 현재 수위(32px, `tokens.css` 의 `text-figure`), 한계 대비 %와 도달까지 남은 초(28px, `text-key`)다. 구역은 색만으로 구분하지 않는다. 카드 제목에 구역 글자를 쓰고, 차트는 선 끝에 구역 글자를 붙인다. 차트의 한계 라벨은 왼쪽 끝에 모은다.
 
