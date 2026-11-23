@@ -7,5 +7,4 @@ node_modules/
 .env*
 !.env.example
 .DS_Store
-CLAUDE.md
 docs/
