@@ -241,6 +241,16 @@ describe("check 9 and the screens", () => {
     expect(display(polled, AT + 5001)).toContain("예측 만료");  // 5.001초 시점에는 만료 표시
   });
 
+  // 재생 중에는 기준 시각이 아닌 받은 뒤 지난 시간으로 만료를 보는지 검사
+  it("marks a replayed prediction expired by the age of the answer, not its basis", () => {
+    const later = AT + 600_000;  // 기록 시각 10분 뒤에 받은 응답
+    const replay = feed(answer({ mode: "replay", dataSource: "replay", elapsedSec: 61 }), later);
+    expect(display(replay, later + 5000)).not.toContain("예측 만료");  // 받은 지 5초면 표시 없음
+    expect(display(replay, later + 5001)).toContain("예측 만료");  // 받은 지 5.001초면 표시
+    // 재생이 아닌 응답은 같은 시각에 받아도 기준 시각으로 봄
+    expect(display(feed(answer(), later), later + 1000)).toContain("예측 만료");
+  });
+
   // 서버 설정이 오기 전에는 한계를 줄표로 보이는지 검사
   it("shows dashes for the thresholds until the server config arrives", () => {
     // 한계를 모르는 상태를 그린 글

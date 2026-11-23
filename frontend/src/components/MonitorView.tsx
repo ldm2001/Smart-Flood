@@ -3,7 +3,7 @@ import {
   entry,
   caption,
   clock,
-  expiry,
+  lapse,
   roster,
   route,
   scope,
@@ -84,8 +84,8 @@ export function Panel(props: Scene & { events?: Events }) {
   const statuses = snapshot ? roster(snapshot.alerts) : null;  // 서버 alerts 로 구역별 단계를 구함
   const banner = snapshot && statuses ? caption(statuses, snapshot.zones) : null;
   const guide = snapshot ? route(snapshot.alerts) : null;  // 서버 alerts 로 만든 대피 안내
-  const meta = snapshot?.predictionMeta;  // 예측 기준 정보(기준 시각·유효 초)
-  const expired = data !== null && meta ? expiry(data.now, Date.parse(meta.basisTime), meta.validForSec) : false;
+  // 예측 만료 표시 여부. 재생은 응답을 받은 뒤 지난 시간으로 봄
+  const expired = data !== null && lapse(data.now, data.snapshot, data.receivedAt);
   const runState = snapshot?.runState;
   const events =  // mock 은 가짜 사건, server 는 읽은 사건
     data === null
