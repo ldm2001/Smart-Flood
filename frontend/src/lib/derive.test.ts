@@ -14,6 +14,7 @@ import {
   HISTORY_LIMIT,
   outage,
   expiry,
+  lapse,
   columns,
   lead,
   share,
@@ -313,11 +314,53 @@ describe("level history", () => {
 
 describe("expiry and disconnection", () => {
   const T = Date.UTC(2026, 9, 23, 1, 0, 0);  // 기준 시각(2026-10-23 01:00 UTC)
+  const MONTH = 30 * 86_400_000;  // 30일(ms). 재생하는 기록이 이만큼 지난 것으로 봄
+  const ANSWER = demo(T, THRESHOLDS);  // 기록 시각·기준 시각이 모두 T 인 응답(재생 아님)
+  const REPLAY: Snapshot = { ...ANSWER, mode: "replay", dataSource: "replay" };  // 같은 값의 재생
+  const LAG: Snapshot = { ...REPLAY, timestamp: stamp(T + 3000) };  // 기준 시각이 3초 앞선 재생
 
   it("a prediction is stale only when now - basis exceeds validity", () => {
     expect(expiry(T + 5000, T, 5)).toBe(false);
     expect(expiry(T + 5001, T, 5)).toBe(true);
     expect(expiry(T - 1000, T, 5)).toBe(false);
+  });
+
+  // 재생이 아니면 받은 시각과 상관없이 기준 시각으로 보는지 검사
+  it("judges a live prediction by its basis, however fresh the answer", () => {
+    expect(lapse(T + 5000, ANSWER, T + 4000)).toBe(false);
+    expect(lapse(T + 5001, ANSWER, T + 5000)).toBe(true);  // 1 ms 전에 받았어도 만료
+  });
+
+  // 재생 중에는 기준 시각이 오래돼도 갓 받은 응답이면 만료가 아닌지 검사
+  it("keeps a fresh replay answer valid however old its basis is", () => {
+    const now = T + MONTH;
+    expect(expiry(now, T, 5)).toBe(true);  // 앞의 식으로는 만료
+    expect(lapse(now, REPLAY, now - 5000)).toBe(false);  // 받은 지 5초
+  });
+
+  // 재생 중에 받은 지 유효 기간이 지난 응답은 만료인지 검사
+  it("expires a replay answer older than its validity", () => {
+    const now = T + MONTH;
+    expect(lapse(now, REPLAY, now - 5001)).toBe(true);  // 받은 지 5.001초
+  });
+
+  // 재생 중에는 받은 뒤 지난 시간에 timestamp - 기준 시각을 더하는지 검사
+  it("adds timestamp - basis to the age of a replay answer", () => {
+    const now = T + MONTH;
+    expect(lapse(now, LAG, now - 2000)).toBe(false);  // 2초 + 3초 = 유효 5초
+    expect(lapse(now, LAG, now - 2001)).toBe(true);
+  });
+
+  // 받은 시각을 모르면(mock) 재생이어도 앞의 식을 쓰는지 검사
+  it("falls back to now - basis when the answer time is unknown", () => {
+    expect(lapse(T + 5000, REPLAY, null)).toBe(false);
+    expect(lapse(T + 5001, REPLAY, null)).toBe(true);
+  });
+
+  // 예측 기준 정보가 없으면 만료로 보지 않는지 검사
+  it("never marks a missing prediction expired", () => {
+    expect(lapse(T + MONTH, { ...ANSWER, predictionMeta: null }, T)).toBe(false);
+    expect(lapse(T + MONTH, { ...REPLAY, predictionMeta: undefined }, T)).toBe(false);
   });
 
   it("disconnected only when more than 4 s passed since the last good response", () => {

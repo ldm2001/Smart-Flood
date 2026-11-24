@@ -198,6 +198,11 @@ class Experiment:
         return replace(snapshot, notifier=self.alarm())  # 무장은 tick 사이에도 바뀜
 
     @property
+    # 판정 기준 입력원. 재생이면 기록한 입력원(모르면 None 이라 모델 판정), 아니면 지금 입력원
+    def basis(self) -> str | None:
+        return self._data_source if self._replay is None else self._replay.data_source
+
+    @property
     # 모델 상태
     def state(self) -> State:
         return self._state
@@ -571,11 +576,12 @@ class Experiment:
             fresh = [(elapsed, readings[z])] if z in readings else []
             samples = (*self._trail.get(z, ()), *fresh)
             trail[z] = tuple(s for s in samples if elapsed - s[0] <= window)
-        # 실측 판정 입력원이면 보드처럼 판정: 실측과 A 수면 높이, 최소 오름을 넘는 기울기, 단계 유지
+        # 판정 기준(basis)이 실측 판정 입력원이면 보드처럼 판정
+        # 실측과 A 수면 높이, 최소 오름을 넘는 기울기, 단계 유지. 재생은 기록한 입력원으로 판정
         view = self.survey(elapsed, latest, trail)  # 구역별 (실측 수위 m, 기울기 m/s)
         for z, (h, r) in view.items():
             levels[z], slopes[z] = h, rising(r, self._rule)
-        latch = self._data_source in self._rule.measured_sources  # 회차 동안 단계를 안 내림
+        latch = self.basis in self._rule.measured_sources  # 회차 동안 단계를 안 내림
         watch = patrol(self._watch, levels, slopes, elapsed, self._rule, latch=latch)
         snapshot = self.capture(state, elapsed, latest, absent, watch, view)
         record = frame(snapshot, state, corrections)
@@ -696,14 +702,15 @@ class Experiment:
             notifier=self.alarm(),  # 그 tick 의 방식·무장(기록 state 줄도 응답과 같게)
         )
 
-    # 실측 판정 입력원이면 구역별 (수위 m, 기울기 m/s): 신선한 실측과 A 수면 높이. 아니면 비어 있음
+    # 판정 기준이 실측 판정 입력원이면 구역별 (수위 m, 기울기 m/s): 신선한 실측과 A 수면 높이
+    # 아니면 비어 있음. 판정 기준은 basis(재생이면 기록한 입력원)
     def survey(
         self,
         elapsed_s: float,
         latest: dict[str, tuple[float, float]],
         trail: dict[str, tuple[tuple[float, float], ...]],
     ) -> dict[str, tuple[float, float]]:
-        if self._data_source not in self._rule.measured_sources:
+        if self.basis not in self._rule.measured_sources:
             return {}
         fresh = {z: h for z, (h, t) in latest.items() if elapsed_s - t <= self._max_age_s}
         floors = {z: self._params.zones[z].z_m for z in ZONES}  # 구역 바닥 높이(m)
