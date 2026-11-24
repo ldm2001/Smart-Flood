@@ -62,15 +62,16 @@ sensor  (firmware/) -------------+
 |---|---|---|
 | `sim` | 가상 센서 (`adapters/sim_source.py`) | 보정한 모델 수위와 모델 변화율 |
 | `live` | 보드가 보낸 메시지 (`adapters/live.py`) | 3초 안의 관측이 있으면 관측 수위와 최근 20초 기울기 · 센서 없는 구역은 A 수면 높이에서 옮긴 값 |
-| `replay` | `backend/logs/` 의 JSONL 기록 (`adapters/replay_source.py`) | 기록을 지금의 `config.yaml` 로 다시 계산한 값 |
+| `replay` | `backend/logs/` 의 JSONL 기록 (`adapters/replay_source.py`) | 기록을 지금의 `config.yaml` 로 다시 계산한 값 · `live` 기록은 `live` 와 같은 방법으로 판정 |
 
 - 입력원은 `POST /api/source` 로 바꾼다
 - 회차가 도는 중에 바꾸려 하면 409 로 거절된다
 - 서버를 다시 띄우면 `sim` 으로 시작한다
 - 재생 중에는 기록 쓰기와 알림을 멈춘다
 - `live` 에서 센서 없는 B · C 는 A 수면 높이에서 구역 바닥 높이를 뺀 수위와 A 기울기로 판정한다 (보드 높이 40 · 70 · 110 mm 와 같은 도달 초)
-- `live` 회차 동안 위험 단계는 내려가지 않는다 (보드와 같다)
-- `live` 예측은 3초 안의 A 관측이 있으면 지금 수위에 실측 기울기와 시간을 곱한 값을 더해 낸다
+- `live` 회차와 그 기록의 재생 동안 위험 단계는 내려가지 않는다 (보드와 같다)
+- `live` 회차와 그 기록의 재생에서 예측은 3초 안의 A 관측이 있으면 지금 수위에 실측 기울기와 시간을 곱한 값을 더해 낸다
+- 입력원이 없거나 `sim` · `live` 가 아닌 기록은 `sim` 기록처럼 판정한다
 
 ## 모듈 계층
 
@@ -172,6 +173,7 @@ cp firmware/board/secrets.h.example firmware/board/secrets.h
 - `SERVER_URL` 에 경로 없이 `http://<노트북 IP>:8000` 을 적는다
 - 시리얼에 `서버 전송 HTTP 200` 이 찍히면 서버가 받았다
 - 보드 관제 화면에서 회차를 시작한 뒤 `state` 가 `live running online A=<수위> measured valid` 를 찍으면 이어진 것이다
+- 보드 관제 화면은 보드가 연 `SMART_FLOOD` 와이파이에 붙은 기기에서만 열리고 공유기 쪽에서 들어오면 안내 한 줄만 받는다
 
 ### 보드 없이 (창 3)
 
