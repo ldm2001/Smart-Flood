@@ -52,12 +52,17 @@ const char* DEVICE_ID = "esp32_1";    // backend/config.yaml devices.allowed 에
 const float INSTALL_HEIGHT_MM = 600.0f;
 const unsigned long REJOIN_MS = 10000;  // 와이파이가 끊긴 채면 이 간격으로 다시 붙어 봄
 
+// ===== 제어 감시 =====
+const unsigned long GUARD_MS = 100;   // 감시 태스크가 깨어나는 간격
+const unsigned long STALL_MS = 1000;  // control() 이 이만큼 넘게 안 돌면 감시 태스크가 펌프를 끔
+
 // ===== 수위센서 =====
 // 0~5000 mm 가 4~20 mA 이고 변환보드 120 Ω 에서 2.604 mm/mV, 0 mm 에서 480 mV
 const float LEVEL_SLOPE_THEORY = 5000.0f / 16.0f / 120.0f;
 const float LEVEL_MV_AT_ZERO = 480.0f;
 const float FAULT_LOW_MV = 300.0f;    // 이 아래는 단선이나 전원 이상
 const float FAULT_HIGH_MV = 2800.0f;  // 이 위는 단락이나 과전압
+const int GOOD_READS = 32;            // 64번 중 범위 안 읽기가 이보다 적은 묶음은 수위에 안 넣음
 
 // ===== 구역 =====
 const int NZ = 3;
@@ -98,6 +103,7 @@ float levelAtStart = 0;
 String stopWhy = "";
 
 float levelMv = 0, levelMm = 0;
+float goodMv = 0;  // 300~2800 mV 안의 읽기만 이동평균한 전압. 수위와 보정에 씀
 bool fault = false;
 bool floatLow = false;
 float rateMeas = 0, rateModel = 0, rate = 0;  // mm/s
@@ -109,8 +115,9 @@ float alertT[NZ], floodT[NZ];  // 첫 경보와 실제 침수 시각(회차 경�
 float areaEst = 0;
 
 const int HN = 30, REG = 20;
-float hist[HN];  // 1초 이력
+float hist[HN];  // 1초 이력. 센서 이상인 초는 빈 칸(NAN)
 int hN = 0, hI = 0;
+int regN = 0;  // 회귀 창 안의 유효 표본 수(빈 칸 뺌)
 const int LOGN = 1800;  // 실험 기록(1초 간격, 최대 30분)
 int16_t logLv[LOGN];
 uint8_t logPump[LOGN];
@@ -121,8 +128,13 @@ String bootId;
 uint32_t seqNo = 0;
 int sendCode = 1;  // 마지막으로 찍은 전송 결과. HTTP 코드, 음수는 오류, 0 은 주소 틀림, 1 은 없음
 
+volatile bool relayOn = false;    // relay() 가 마지막으로 건 상태(감시 태스크가 읽음)
+volatile unsigned long beat = 0;  // control() 이 마지막으로 돈 시각(ms)
+volatile bool stall = false;      // 감시 태스크가 릴레이를 끈 뒤 pump() 가 다시 걸 때까지 true
+
 // ===== 릴레이 =====
 // 릴레이를 켜거나 끔. 끌 때 RELAY_OFF_HIGHZ 면 핀을 입력으로 풀어 모듈의 풀업이 끄게 함
+// 건 상태는 relayOn 에 남김(감시 태스크가 읽음)
 void relay(bool on) {
   if (RELAY_ACTIVE_LOW) {
     if (on) {
@@ -138,10 +150,17 @@ void relay(bool on) {
     pinMode(PIN_RELAY, OUTPUT);
     digitalWrite(PIN_RELAY, on ? HIGH : LOW);
   }
+  relayOn = on;
 }
 
-// 펌프 상태를 바꾸고 가동 시간을 쌓음
+// 펌프 상태를 바꾸고 가동 시간을 쌓음. 감시 태스크가 릴레이를 꺼 두었으면 요청 상태로 다시 걸고
+// 시리얼에 한 줄 찍음
 void pump(bool on) {
+  if (stall) {  // 감시 태스크가 꺼 둔 릴레이를 요청 상태로 다시 걺
+    stall = false;
+    relay(on);
+    Serial.printf("[GUARD] 제어 루프가 %lu ms 넘게 늦어 그동안 펌프를 꺼 둠\n", STALL_MS);
+  }
   if (on == pumpOn) return;
   if (on) pumpOnSince = millis();
   else pumpOnTotalS += (millis() - pumpOnSince) / 1000.0f;
@@ -174,18 +193,33 @@ void recall() {
 
 // ===== 측정 =====
 // 수위센서 전압(mV). 64번 읽은 평균
-float voltage() {
-  uint32_t s = 0;
-  for (int i = 0; i < 64; i++) s += analogReadMilliVolts(PIN_LEVEL);
+// good 에는 300~2800 mV 안의 읽기만의 평균. 그런 읽기가 GOOD_READS 번보다 적으면 NAN
+float voltage(float& good) {
+  uint32_t s = 0, gs = 0;
+  int gn = 0;
+  for (int i = 0; i < 64; i++) {
+    uint32_t v = analogReadMilliVolts(PIN_LEVEL);
+    s += v;
+    if (v >= FAULT_LOW_MV && v <= FAULT_HIGH_MV) {  // 범위 안 읽기만 따로 모음
+      gs += v;
+      gn++;
+    }
+  }
+  good = gn >= GOOD_READS ? (float)gs / gn : NAN;
   return s / 64.0f;
 }
 
 // 100 ms 마다: 전압을 이동평균하고 수위(mm)와 플로트 상태를 갱신
+// levelMv 는 모든 읽기의 평균(센서 이상 판정), goodMv 는 300~2800 mV 안의 읽기만의 평균(수위)
 void sample() {
-  float mv = voltage();
+  float good;
+  float mv = voltage(good);
   levelMv = (levelMv == 0) ? mv : levelMv * 0.85f + mv * 0.15f;
   fault = (levelMv < FAULT_LOW_MV || levelMv > FAULT_HIGH_MV);
-  levelMm = cfg.lvSlope * levelMv + cfg.lvOffset;
+  if (!isnan(good)) {  // 범위 안 읽기가 모자란 묶음은 수위를 움직이지 않음
+    goodMv = (goodMv == 0) ? good : goodMv * 0.85f + good * 0.15f;
+  }
+  levelMm = cfg.lvSlope * goodMv + cfg.lvOffset;
   if (levelMm < 0) levelMm = 0;
   bool closed = digitalRead(PIN_FLOAT) == LOW;
   floatLow = FLOAT_LOW_WHEN_CLOSED ? closed : !closed;
@@ -201,20 +235,24 @@ float duty() {
   return 0;
 }
 
-// 최근 REG 초의 선형회귀 기울기(mm/s)
+// 최근 REG 초의 선형회귀 기울기(mm/s). 빈 칸은 건너뛰고 x 는 칸 번호 그대로 씀
+// 유효 표본 수를 regN 에 남김. 5개 미만이면 0
 float regression() {
   int n = hN < REG ? hN : REG;
-  if (n < 5) return 0;
+  regN = 0;
   float sx = 0, sy = 0, sxx = 0, sxy = 0;
   for (int k = 0; k < n; k++) {
     float y = hist[(hI - n + k + HN) % HN], x = k;
+    if (isnan(y)) continue;
+    regN++;
     sx += x;
     sy += y;
     sxx += x * x;
     sxy += x * y;
   }
-  float d = n * sxx - sx * sx;
-  return d == 0 ? 0 : (n * sxy - sx * sy) / d;
+  if (regN < 5) return 0;
+  float d = regN * sxx - sx * sx;
+  return d == 0 ? 0 : (regN * sxy - sx * sy) / d;
 }
 
 // 단계가 오른 구역의 알림 문구를 쌓음
@@ -231,15 +269,22 @@ void alert(int zi, int st) {
 }
 
 // 1초마다: 이력을 쌓고 상승 속도, 예측 수위, 구역별 침수까지 남은 초와 단계를 갱신
+// 센서 이상인 초는 이력에 빈 칸(NAN)을 두고 기록 한 줄만 남김. 속도·예측·단계는 그대로 둠
 void forecast() {
-  hist[hI] = levelMm;
+  hist[hI] = fault ? NAN : levelMm;
   hI = (hI + 1) % HN;
   if (hN < HN) hN++;
+  if (running && logN < LOGN) {  // 센서 이상인 초에도 붙잡아 둔 수위로 한 줄
+    logLv[logN] = (int16_t)(levelMm * 10);
+    logPump[logN] = pumpOn ? 1 : 0;
+    logN++;
+  }
+  if (fault) return;  // 속도·예측 수위·남은 초·단계·면적 추정을 지난 값 그대로 둠
   rateMeas = regression();
   float flowMmS = (cfg.flowMlS > 0 && cfg.areaCm2 > 0) ? cfg.flowMlS / cfg.areaCm2 * 10.0f : 0;
   rateModel = flowMmS * duty();
   // 측정 이력이 충분하고 실제로 오르고 있으면 측정값, 아니면 펌프 유량 기반 모델값
-  if (hN >= 15 && rateMeas > 0.01f) {
+  if (regN >= 15 && rateMeas > 0.01f) {
     rate = rateMeas;
     rateSrc = "실측 기울기";
   } else if (rateModel > 0) {
@@ -273,17 +318,12 @@ void forecast() {
   float rise = levelMm - levelAtStart;
   float pumpedMl = (pumpOnTotalS + (pumpOn ? (millis() - pumpOnSince) / 1000.0f : 0)) * cfg.flowMlS;
   areaEst = (running && rise > 5 && pumpedMl > 0) ? pumpedMl / (rise / 10.0f) : 0;
-
-  if (running && logN < LOGN) {
-    logLv[logN] = (int16_t)(levelMm * 10);
-    logPump[logN] = pumpOn ? 1 : 0;
-    logN++;
-  }
 }
 
 // ===== 펌프 제어와 안전 =====
 // 100 ms 마다: 안전 조건이 하나라도 걸리면 펌프를 끄고, 아니면 모드대로 돌림
 void control() {
+  beat = millis();  // 감시 태스크가 보는 마지막으로 돈 시각
   if (mode == M_STOP) {
     pump(false);
     return;
@@ -328,6 +368,21 @@ void control() {
       phaseSince = millis();
     }
     pump(phaseOn);
+  }
+}
+
+// 제어 감시 태스크(코어 0, loop 보다 높은 우선순위). 릴레이가 켜진 채 control() 이 STALL_MS
+// 넘게 안 돌면 릴레이를 끄고 stall 을 세움. 보드 리셋이나 회차 끝냄은 없음
+void guard(void*) {
+  for (;;) {
+    if (relayOn) {
+      unsigned long b = beat;  // millis() 보다 먼저 읽어 b 가 지금보다 늦지 않음
+      if (millis() - b > STALL_MS) {
+        relay(false);  // 릴레이를 먼저 끄고 표시는 나중
+        stall = true;
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(GUARD_MS));
   }
 }
 
@@ -376,26 +431,50 @@ void outcome(int code) {
   else Serial.println("서버 전송 실패: " + HTTPClient::errorToString(code));
 }
 
-// 1초마다: 수위를 서버 메시지 모양(distA_mm 는 설치 높이 - 수위)으로 보냄. 이상이면 null 과 fault
-// floatSwitch 는 급수통 물 부족이면 low, 아니면 normal
-// running 은 회차가 열려 있으면 true(안전 정지 중에도), 정지 명령 뒤 false
-// 서버가 보드 회차를 따라가는 데 씀
-void ingest() {
-  if (!*SERVER_URL || WiFi.status() != WL_CONNECTED) return;
+// 서버로 보낼 본문 하나(대기열 칸). 포인터 없이 통째로 복사됨
+struct Packet {
+  char body[320];  // 가장 긴 본문 234 B(센서 이상, seq·tMs 10자리, running false)
+};
+QueueHandle_t bodyQ = nullptr;  // 서버 전송 대기열(길이 1, 새 본문이 옛 본문을 덮음)
+volatile int replyCode = 1;     // 전송 태스크가 남긴 마지막 결과
+volatile uint32_t replyN = 0;   // 전송 태스크가 결과를 남길 때마다 1 늚
+
+// 서버 전송 태스크. 대기열의 본문을 POST /api/ingest 로 보내고 결과만 남김(시리얼에 찍지 않음)
+void sender(void*) {
   size_t n = strlen(SERVER_URL);
   while (n > 0 && SERVER_URL[n - 1] == '/') n--;  // 끝의 / 를 빼고 붙여 //api 가 되지 않음
   char url[200];
   snprintf(url, sizeof(url), "%.*s/api/ingest", (int)n, SERVER_URL);
-  HTTPClient http;
-  http.setTimeout(400);
-  http.setConnectTimeout(400);  // 서버가 꺼져 있어도 안전 루프(100 ms)를 오래 막지 않음
-  if (!http.begin(String(url))) {
-    outcome(0);
-    return;
+  for (;;) {
+    Packet p;
+    if (xQueueReceive(bodyQ, &p, portMAX_DELAY) != pdTRUE) continue;
+    HTTPClient http;
+    http.setTimeout(400);
+    http.setConnectTimeout(400);  // 서버가 꺼져 있어도 다음 본문을 오래 미루지 않음
+    int code = 0;                 // 주소를 읽지 못하면 0
+    if (http.begin(String(url))) {
+      http.addHeader("Content-Type", "application/json");
+      code = http.POST((uint8_t*)p.body, strlen(p.body));
+      http.end();
+    }
+    replyCode = code;
+    replyN = replyN + 1;  // 결과를 먼저 쓰고 번호를 나중에 올림
   }
-  http.addHeader("Content-Type", "application/json");
-  char body[320];  // 가장 긴 본문 234 B(센서 이상, seq·tMs 10자리, running false)
-  snprintf(body, sizeof(body),
+}
+
+// 1초마다: 수위를 서버 메시지 모양(distA_mm 는 설치 높이 - 수위)으로 만들어 전송 대기열에 넣음
+// 이상이면 null 과 fault. floatSwitch 는 급수통 물 부족이면 low, 아니면 normal
+// running 은 회차가 열려 있으면 true(안전 정지 중에도), 정지 명령 뒤 false
+// 서버가 보드 회차를 따라가는 데 씀. 보내기는 sender 태스크 몫이라 loop 는 서버를 기다리지 않음
+void ingest() {
+  if (!*SERVER_URL || WiFi.status() != WL_CONNECTED) return;
+  if (!bodyQ) {
+    bodyQ = xQueueCreate(1, sizeof(Packet));
+    if (!bodyQ) return;
+    xTaskCreatePinnedToCore(sender, "sender", 8192, nullptr, 1, nullptr, 0);
+  }
+  Packet p;
+  snprintf(p.body, sizeof(p.body),
            "{\"deviceId\":\"%s\",\"bootId\":\"%s\",\"seq\":%lu,\"tMs\":%lu,"
            "\"readings\":{\"distA_mm\":%s,\"distB_mm\":null,\"weight_g\":null},"
            "\"sensorStatus\":{\"A\":\"%s\",\"B\":\"absent\",\"load\":\"absent\"},"
@@ -403,8 +482,16 @@ void ingest() {
            DEVICE_ID, bootId.c_str(), (unsigned long)seqNo++, (unsigned long)millis(),
            fault ? "null" : String(INSTALL_HEIGHT_MM - levelMm, 1).c_str(),
            fault ? "fault" : "ok", floatLow ? "low" : "normal", running ? "true" : "false");
-  outcome(http.POST((uint8_t*)body, strlen(body)));
-  http.end();
+  xQueueOverwrite(bodyQ, &p);  // 앞 본문이 아직 안 나갔으면 새 본문으로 덮음
+}
+
+// 1초마다: 전송 태스크가 새 결과를 남겼으면 outcome 으로 넘김
+void result() {
+  static uint32_t last = 0;  // 마지막으로 넘긴 결과 번호
+  uint32_t n = replyN;
+  if (n == last) return;
+  last = n;
+  outcome(replyCode);
 }
 
 QueueHandle_t pushQ = nullptr;  // ntfy 전송 대기열(글 사본 포인터)
@@ -487,14 +574,16 @@ void status() {
   server.send(200, "application/json", s);
 }
 
-// GET /api/hist: 최근 120초 수위. 회차 밖이면 1초 이력
+// GET /api/hist: 최근 120초 수위. 회차 밖이면 1초 이력(빈 칸은 뺌)
 void history() {
   String s = "[";
   int n = logN < 120 ? logN : 120;
   if (!running && n == 0) {
     for (int k = 0; k < hN; k++) {
-      if (k) s += ",";
-      s += String(hist[(hI - hN + k + HN) % HN], 1);
+      float y = hist[(hI - hN + k + HN) % HN];
+      if (isnan(y)) continue;  // JSON 에 nan 이 들어가지 않음
+      if (s.length() > 1) s += ",";
+      s += String(y, 1);
     }
   } else {
     for (int k = logN - n; k < logN; k++) {
@@ -548,15 +637,15 @@ void cmd() {
     cfg.areaCm2 = areaEst;
     commit();
   } else if (c == "cal1") {
-    cfg.cal1mv = levelMv;
+    cfg.cal1mv = goodMv;
     cfg.cal1mm = v;
     cfg.cal1 = true;
     cfg.lvSlope = LEVEL_SLOPE_THEORY;
-    cfg.lvOffset = v - cfg.lvSlope * levelMv;
+    cfg.lvOffset = v - cfg.lvSlope * goodMv;
     commit();
-  } else if (c == "cal2" && cfg.cal1 && fabs(levelMv - cfg.cal1mv) > 5) {
-    cfg.lvSlope = (v - cfg.cal1mm) / (levelMv - cfg.cal1mv);
-    cfg.lvOffset = v - cfg.lvSlope * levelMv;
+  } else if (c == "cal2" && cfg.cal1 && fabs(goodMv - cfg.cal1mv) > 5) {
+    cfg.lvSlope = (v - cfg.cal1mm) / (goodMv - cfg.cal1mv);
+    cfg.lvOffset = v - cfg.lvSlope * goodMv;
     commit();
   } else if (c == "calreset") {
     Config d;
@@ -587,6 +676,16 @@ void settings() {
   server.send(200, "text/plain", "ok");
 }
 
+// 관제 화면 요청 거르기. 보드 AP 주소로 들어왔고 AP 대역에서 보낸 요청만 받음
+// lwIP 는 공유기 쪽으로 들어온 AP 주소 요청도 받으므로 두 조건을 다 봄
+bool gate(WebServer& web) {
+  NetworkClient& c = web.client();
+  IPAddress ap = WiFi.softAPIP(), local = c.localIP(), peer = c.remoteIP();
+  if (ap.type() != IPv4 || local.type() != IPv4 || peer.type() != IPv4) return false;
+  uint32_t mask = WiFi.softAPSubnetMask();
+  return local == ap && (uint32_t(peer) & mask) == (uint32_t(ap) & mask);
+}
+
 // ===== setup / loop =====
 void setup() {
   relay(false);  // 부팅 직후 펌프 OFF
@@ -612,19 +711,27 @@ void setup() {
   if (!webOn) {
     Serial.println("AP_PASS 가 없거나 8자 미만이라 SMART_FLOOD 와이파이와 관제 화면을 열지 않음");
     Serial.println("같은 폴더의 secrets.h.example 을 secrets.h 로 복사해 다시 올리면 열림");
+    xTaskCreatePinnedToCore(guard, "guard", 4096, nullptr, 2, nullptr, 0);  // 제어 감시
     return;
   }
   WiFi.softAP(AP_SSID, AP_PASS);
   Serial.print("관제 화면: http://");
   Serial.println(WiFi.softAPIP().toString());
 
-  server.on("/", []() { server.send_P(200, "text/html; charset=utf-8", PAGE); });
-  server.on("/api/status", status);
-  server.on("/api/hist", history);
-  server.on("/api/cmd", cmd);
-  server.on("/api/set", settings);
-  server.on("/log.csv", csv);
+  // 경로마다 gate 로 걸러 SMART_FLOOD 쪽 요청만 받음
+  server.on("/", []() { server.send_P(200, "text/html; charset=utf-8", PAGE); }).setFilter(gate);
+  server.on("/api/status", status).setFilter(gate);
+  server.on("/api/hist", history).setFilter(gate);
+  server.on("/api/cmd", cmd).setFilter(gate);
+  server.on("/api/set", settings).setFilter(gate);
+  server.on("/log.csv", csv).setFilter(gate);
+  server.onNotFound([]() {  // 거른 요청과 없는 경로. 화면을 여는 곳만 알려 줌
+    server.send(404, "text/plain; charset=utf-8",
+                "관제 화면: http://" + WiFi.softAPIP().toString() + " (와이파이 " + AP_SSID +
+                    " 에 붙은 기기에서만 열림)");
+  });
   server.begin();
+  xTaskCreatePinnedToCore(guard, "guard", 4096, nullptr, 2, nullptr, 0);  // 제어 감시
 }
 
 void loop() {
@@ -640,6 +747,7 @@ void loop() {
     forecast();
     Serial.printf("t=%.0f lv=%.1fmm rate=%.2fmm/min eta A=%.0f B=%.0f C=%.0f pump=%d\n",
                   elapsedS(), levelMm, rate * 60, eta[0], eta[1], eta[2], pumpOn);
+    result();  // 지난 초에 끝난 전송 결과를 wifi() 가 sendCode 를 지우기 전에 찍음
     wifi();
     ingest();
     push();
