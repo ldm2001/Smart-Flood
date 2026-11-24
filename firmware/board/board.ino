@@ -63,6 +63,7 @@ const float LEVEL_MV_AT_ZERO = 480.0f;
 const float FAULT_LOW_MV = 300.0f;    // 이 아래는 단선이나 전원 이상
 const float FAULT_HIGH_MV = 2800.0f;  // 이 위는 단락이나 과전압
 const int GOOD_READS = 32;            // 64번 중 범위 안 읽기가 이보다 적은 묶음은 수위에 안 넣음
+const int MISS_BURSTS = 20;           // 그런 묶음이 이만큼(2초) 이어지면 센서 이상
 
 // ===== 구역 =====
 const int NZ = 3;
@@ -128,9 +129,10 @@ String bootId;
 uint32_t seqNo = 0;
 int sendCode = 1;  // 마지막으로 찍은 전송 결과. HTTP 코드, 음수는 오류, 0 은 주소 틀림, 1 은 없음
 
-volatile bool relayOn = false;    // relay() 가 마지막으로 건 상태(감시 태스크가 읽음)
-volatile unsigned long beat = 0;  // control() 이 마지막으로 돈 시각(ms)
-volatile bool stall = false;      // 감시 태스크가 릴레이를 끈 뒤 pump() 가 다시 걸 때까지 true
+volatile bool relayOn = false;       // relay() 가 마지막으로 건 상태(감시 태스크와 pump() 가 읽음)
+volatile unsigned long beat = 0;     // control() 이 마지막으로 돈 시각(ms)
+volatile bool stall = false;         // 감시 태스크가 릴레이를 끈 뒤 다음 control() 까지 true
+volatile unsigned long stallAt = 0;  // 감시 태스크가 릴레이를 끈 시각(ms)
 
 // ===== 릴레이 =====
 // 릴레이를 켜거나 끔. 끌 때 RELAY_OFF_HIGHZ 면 핀을 입력으로 풀어 모듈의 풀업이 끄게 함
@@ -153,19 +155,14 @@ void relay(bool on) {
   relayOn = on;
 }
 
-// 펌프 상태를 바꾸고 가동 시간을 쌓음. 감시 태스크가 릴레이를 꺼 두었으면 요청 상태로 다시 걸고
-// 시리얼에 한 줄 찍음
+// 펌프 상태를 바꾸고 가동 시간을 쌓음. 감시 태스크가 꺼 둔 릴레이도 요청 상태로 다시 걺
 void pump(bool on) {
-  if (stall) {  // 감시 태스크가 꺼 둔 릴레이를 요청 상태로 다시 걺
-    stall = false;
-    relay(on);
-    Serial.printf("[GUARD] 제어 루프가 %lu ms 넘게 늦어 그동안 펌프를 꺼 둠\n", STALL_MS);
+  if (on != pumpOn) {
+    if (on) pumpOnSince = millis();
+    else pumpOnTotalS += (millis() - pumpOnSince) / 1000.0f;
+    pumpOn = on;
   }
-  if (on == pumpOn) return;
-  if (on) pumpOnSince = millis();
-  else pumpOnTotalS += (millis() - pumpOnSince) / 1000.0f;
-  pumpOn = on;
-  relay(on);
+  if (relayOn != on) relay(on);
 }
 
 // 펌프를 끄고 멈춘 까닭을 남김
@@ -211,14 +208,19 @@ float voltage(float& good) {
 
 // 100 ms 마다: 전압을 이동평균하고 수위(mm)와 플로트 상태를 갱신
 // levelMv 는 모든 읽기의 평균(센서 이상 판정), goodMv 는 300~2800 mV 안의 읽기만의 평균(수위)
+// levelMv 가 범위 안이어도 범위 안 읽기가 모자란 묶음이 MISS_BURSTS 번 이어지면 센서 이상
 void sample() {
+  static int miss = 0;  // 범위 안 읽기가 모자란 묶음이 이어진 수
   float good;
   float mv = voltage(good);
   levelMv = (levelMv == 0) ? mv : levelMv * 0.85f + mv * 0.15f;
-  fault = (levelMv < FAULT_LOW_MV || levelMv > FAULT_HIGH_MV);
-  if (!isnan(good)) {  // 범위 안 읽기가 모자란 묶음은 수위를 움직이지 않음
+  if (isnan(good)) {  // 범위 안 읽기가 모자란 묶음은 수위를 움직이지 않음
+    if (miss < MISS_BURSTS) miss++;
+  } else {
+    miss = 0;
     goodMv = (goodMv == 0) ? good : goodMv * 0.85f + good * 0.15f;
   }
+  fault = levelMv < FAULT_LOW_MV || levelMv > FAULT_HIGH_MV || miss >= MISS_BURSTS;
   levelMm = cfg.lvSlope * goodMv + cfg.lvOffset;
   if (levelMm < 0) levelMm = 0;
   bool closed = digitalRead(PIN_FLOAT) == LOW;
@@ -324,6 +326,14 @@ void forecast() {
 // 100 ms 마다: 안전 조건이 하나라도 걸리면 펌프를 끄고, 아니면 모드대로 돌림
 void control() {
   beat = millis();  // 감시 태스크가 보는 마지막으로 돈 시각
+  if (stall) {  // 감시 태스크가 릴레이를 꺼 둔 시간은 누적 가동과 유량 측정 30초에 안 넣음
+    stall = false;
+    unsigned long off = millis() - stallAt;
+    if (pumpOn) pumpOnTotalS -= off / 1000.0f;
+    // 유량 측정이 시작된 뒤 꺼졌으면 꺼진 만큼 끝을 늦춤
+    if (mode == M_FLOWTEST && (long)(stallAt - flowTestStart) >= 0) flowTestStart += off;
+    Serial.printf("[GUARD] 제어 루프가 %lu ms 넘게 늦어 그동안 펌프를 꺼 둠\n", STALL_MS);
+  }
   if (mode == M_STOP) {
     pump(false);
     return;
@@ -372,13 +382,14 @@ void control() {
 }
 
 // 제어 감시 태스크(코어 0, loop 보다 높은 우선순위). 릴레이가 켜진 채 control() 이 STALL_MS
-// 넘게 안 돌면 릴레이를 끄고 stall 을 세움. 보드 리셋이나 회차 끝냄은 없음
+// 넘게 안 돌면 릴레이를 끄고 끈 시각과 stall 을 남김. 보드 리셋이나 회차 끝냄은 없음
 void guard(void*) {
   for (;;) {
     if (relayOn) {
       unsigned long b = beat;  // millis() 보다 먼저 읽어 b 가 지금보다 늦지 않음
       if (millis() - b > STALL_MS) {
         relay(false);  // 릴레이를 먼저 끄고 표시는 나중
+        stallAt = millis();
         stall = true;
       }
     }
@@ -471,7 +482,14 @@ void ingest() {
   if (!bodyQ) {
     bodyQ = xQueueCreate(1, sizeof(Packet));
     if (!bodyQ) return;
-    xTaskCreatePinnedToCore(sender, "sender", 8192, nullptr, 1, nullptr, 0);
+    if (xTaskCreatePinnedToCore(sender, "sender", 8192, nullptr, 1, nullptr, 0) != pdPASS) {
+      vQueueDelete(bodyQ);  // 다음 초에 대기열부터 다시 만듦
+      bodyQ = nullptr;
+      static bool told = false;  // 못 만든 일은 처음 한 번만 찍음
+      if (!told) Serial.println("서버 전송 태스크를 만들지 못함. 1초마다 다시 만들어 봄");
+      told = true;
+      return;
+    }
   }
   Packet p;
   snprintf(p.body, sizeof(p.body),
@@ -700,6 +718,10 @@ void setup() {
     eta[i] = -1;
   }
   bootId = String((uint32_t)esp_random(), HEX);
+  // 제어 감시 태스크. 관제 화면을 열든 안 열든 만듦
+  if (xTaskCreatePinnedToCore(guard, "guard", 4096, nullptr, 2, nullptr, 0) != pdPASS) {
+    Serial.println("제어 감시 태스크를 만들지 못해 감시 없이 돎");
+  }
 
   webOn = strlen(AP_PASS) >= 8;  // WPA2 암호는 8자 이상
   if (*STA_SSID) {
@@ -711,7 +733,6 @@ void setup() {
   if (!webOn) {
     Serial.println("AP_PASS 가 없거나 8자 미만이라 SMART_FLOOD 와이파이와 관제 화면을 열지 않음");
     Serial.println("같은 폴더의 secrets.h.example 을 secrets.h 로 복사해 다시 올리면 열림");
-    xTaskCreatePinnedToCore(guard, "guard", 4096, nullptr, 2, nullptr, 0);  // 제어 감시
     return;
   }
   WiFi.softAP(AP_SSID, AP_PASS);
@@ -731,7 +752,6 @@ void setup() {
                     " 에 붙은 기기에서만 열림)");
   });
   server.begin();
-  xTaskCreatePinnedToCore(guard, "guard", 4096, nullptr, 2, nullptr, 0);  // 제어 감시
 }
 
 void loop() {
