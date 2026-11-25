@@ -13,6 +13,8 @@
 #include <WebServer.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <cctype>
+#include <cmath>
 #include "page.h"
 
 #if __has_include("secrets.h")
@@ -64,6 +66,14 @@ const float FAULT_LOW_MV = 300.0f;    // 이 아래는 단선이나 전원 이�
 const float FAULT_HIGH_MV = 2800.0f;  // 이 위는 단락이나 과전압
 const int GOOD_READS = 32;            // 64번 중 범위 안 읽기가 이보다 적은 묶음은 수위에 안 넣음
 const int MISS_BURSTS = 20;           // 그런 묶음이 이만큼(2초) 이어지면 센서 이상
+
+// ===== 입력 범위(웹에서 받는 값과 플래시에서 읽은 값) =====
+// 수위 칸(z·maxLevel·보정 mm)은 0~INSTALL_HEIGHT_MM 만 받음
+const float TIME_MAX_S = 1800.0f;                // 경보 초와 강우 ON·OFF 초의 최대(회차 최대 길이)
+const float RAIN_ON_MIN_S = 0.5f;                // 강우 ON 초의 최소
+const float FLOW_ML_MAX = 30000.0f;              // 유량 측정 30초에 받은 양의 최대(mL)
+const float SLOPE_MIN = LEVEL_SLOPE_THEORY / 2;  // 보정 기울기의 최소(이론값의 1/2배)
+const float SLOPE_MAX = LEVEL_SLOPE_THEORY * 2;  // 보정 기울기의 최대(이론값의 2배)
 
 // ===== 구역 =====
 const int NZ = 3;
@@ -173,6 +183,25 @@ void cutoff(const String& why) {
   Serial.println("[STOP] " + why);
 }
 
+// ===== 값 확인 =====
+// lo 이상 hi 이하의 유한한 수인지(nan·inf 는 아님)
+bool inside(double x, double lo, double hi) { return std::isfinite(x) && x >= lo && x <= hi; }
+
+// 앞뒤 공백 말고는 수 하나만 든 글자이고 그 수가 lo~hi 안일 때만 out 에 넣음
+// 빈 칸·수 뒤 글자(%00 뒤 글자 포함)·nan·inf 는 거름. 1e2·0x10 같은 C 표기는 수로 읽음
+// String::toFloat 처럼 double 로 읽어 float 로 바꾸므로 맞는 값은 예전과 같은 비트
+bool number(const String& text, double lo, double hi, float& out) {
+  const char* s = text.c_str();
+  if (!s) return false;  // 힙 부족으로 무효가 된 String(toFloat 도 같은 확인)
+  char* end = nullptr;
+  double x = strtod(s, &end);
+  if (end == s) return false;
+  while (isspace((unsigned char)*end)) end++;
+  if (end != s + text.length() || !inside(x, lo, hi)) return false;
+  out = (float)x;
+  return true;
+}
+
 // ===== 저장 =====
 // 설정을 플래시에 저장
 void commit() {
@@ -182,10 +211,46 @@ void commit() {
 }
 
 // 플래시의 설정을 읽음. 크기가 다르면(펌웨어가 바뀜) 기본값을 씀
+// 쓸 수 없는 칸(nan·inf·범위 밖)은 그 칸만 기본값으로 되돌리고 시리얼에 찍은 뒤 다시 저장
+// 보정 칸은 하나라도 쓸 수 없으면 보정 전체를 기본값으로 되돌림
 void recall() {
   prefs.begin("flood2", true);
   if (prefs.getBytesLength("cfg") == sizeof(cfg)) prefs.getBytes("cfg", &cfg, sizeof(cfg));
   prefs.end();
+  Config d;
+  String bad;
+  auto keep = [&bad](const char* k, float& x, float def, double lo, double hi) {
+    if (inside(x, lo, hi)) return;
+    x = def;
+    bad += " ";
+    bad += k;
+  };
+  keep("z0", cfg.z[0], d.z[0], 0, INSTALL_HEIGHT_MM);
+  keep("z1", cfg.z[1], d.z[1], 0, INSTALL_HEIGHT_MM);
+  keep("z2", cfg.z[2], d.z[2], 0, INSTALL_HEIGHT_MM);
+  keep("maxLevel", cfg.maxLevel, d.maxLevel, 0, INSTALL_HEIGHT_MM);
+  keep("cautionEta", cfg.cautionEta, d.cautionEta, 0, TIME_MAX_S);
+  keep("warningEta", cfg.warningEta, d.warningEta, 0, TIME_MAX_S);
+  keep("flowMlS", cfg.flowMlS, d.flowMlS, 0, FLOW_ML_MAX / 30);
+  keep("areaCm2", cfg.areaCm2, d.areaCm2, 0, INFINITY);
+  keep("rainOnS", cfg.rainOnS, d.rainOnS, RAIN_ON_MIN_S, TIME_MAX_S);
+  keep("rainOffS", cfg.rainOffS, d.rainOffS, 0, TIME_MAX_S);
+  // pumpMaxOnS·runMaxS 는 웹에서 못 바꾸므로 기본값이 최대
+  keep("pumpMaxOnS", cfg.pumpMaxOnS, d.pumpMaxOnS, 0, d.pumpMaxOnS);
+  keep("runMaxS", cfg.runMaxS, d.runMaxS, 0, d.runMaxS);
+  if (!inside(cfg.lvSlope, SLOPE_MIN, SLOPE_MAX) || !std::isfinite(cfg.lvOffset) ||
+      !std::isfinite(cfg.cal1mv) || !inside(cfg.cal1mm, 0, INSTALL_HEIGHT_MM)) {
+    cfg.lvSlope = d.lvSlope;
+    cfg.lvOffset = d.lvOffset;
+    cfg.cal1mv = d.cal1mv;
+    cfg.cal1mm = d.cal1mm;
+    cfg.cal1 = false;
+    bad += " cal";
+  }
+  if (bad.length()) {
+    Serial.println("저장 설정의 쓸 수 없는 값을 기본값으로 되돌림:" + bad);
+    commit();
+  }
 }
 
 // ===== 측정 =====
@@ -624,9 +689,11 @@ void csv() {
 }
 
 // GET /api/cmd?c=명령&v=값: 시작·정지·수동·유량 측정·보정
+// 값을 받는 명령(flowset·cal1·cal2)은 값이 수가 아니거나 범위 밖이거나 쓸 수 없으면 하지 않고 400
 void cmd() {
   String c = server.arg("c");
-  float v = server.arg("v").toFloat();
+  float v = 0;
+  bool bad = false;
   if (c == "stop") {
     cutoff("사용자 정지");
     running = false;
@@ -648,23 +715,36 @@ void cmd() {
     stopWhy = "";
     mode = M_FLOWTEST;
     flowTestStart = millis();
-  } else if (c == "flowset" && v > 0) {
-    cfg.flowMlS = v / 30.0f;
-    commit();
+  } else if (c == "flowset") {
+    bad = !number(server.arg("v"), 0, FLOW_ML_MAX, v) || v <= 0;
+    if (!bad) {
+      cfg.flowMlS = v / 30.0f;
+      commit();
+    }
   } else if (c == "areaapply" && areaEst > 0) {
     cfg.areaCm2 = areaEst;
     commit();
   } else if (c == "cal1") {
-    cfg.cal1mv = goodMv;
-    cfg.cal1mm = v;
-    cfg.cal1 = true;
-    cfg.lvSlope = LEVEL_SLOPE_THEORY;
-    cfg.lvOffset = v - cfg.lvSlope * goodMv;
-    commit();
-  } else if (c == "cal2" && cfg.cal1 && fabs(goodMv - cfg.cal1mv) > 5) {
-    cfg.lvSlope = (v - cfg.cal1mm) / (goodMv - cfg.cal1mv);
-    cfg.lvOffset = v - cfg.lvSlope * goodMv;
-    commit();
+    bad = !number(server.arg("v"), 0, INSTALL_HEIGHT_MM, v);
+    if (!bad) {
+      cfg.cal1mv = goodMv;
+      cfg.cal1mm = v;
+      cfg.cal1 = true;
+      cfg.lvSlope = LEVEL_SLOPE_THEORY;
+      cfg.lvOffset = v - cfg.lvSlope * goodMv;
+      commit();
+    }
+  } else if (c == "cal2") {
+    // 보정점 1 뒤 전압이 5 mV 넘게 달라졌고 기울기가 SLOPE_MIN~SLOPE_MAX 안일 때만
+    bad = !cfg.cal1 || fabs(goodMv - cfg.cal1mv) <= 5 ||
+          !number(server.arg("v"), 0, INSTALL_HEIGHT_MM, v);
+    float slope = bad ? 0 : (v - cfg.cal1mm) / (goodMv - cfg.cal1mv);
+    bad = bad || !inside(slope, SLOPE_MIN, SLOPE_MAX);
+    if (!bad) {
+      cfg.lvSlope = slope;
+      cfg.lvOffset = v - cfg.lvSlope * goodMv;
+      commit();
+    }
   } else if (c == "calreset") {
     Config d;
     cfg.lvSlope = d.lvSlope;
@@ -672,26 +752,31 @@ void cmd() {
     cfg.cal1 = false;
     commit();
   }
-  server.send(200, "text/plain", "ok");
+  if (bad) server.send(400, "text/plain", "rejected " + c);
+  else server.send(200, "text/plain", "ok");
 }
 
 // GET /api/set?키=값: 기준 높이와 경보 설정 저장
+// 수가 아니거나 범위 밖인 칸은 그대로 두고 나머지만 저장. 거른 칸 이름을 400 으로 알림
 void settings() {
-  auto param = [](const char* k, float& dst) {
-    if (server.hasArg(k)) dst = server.arg(k).toFloat();
+  String bad;
+  auto param = [&bad](const char* k, float& dst, double lo, double hi) {
+    if (server.hasArg(k) && !number(server.arg(k), lo, hi, dst)) {
+      bad += " ";
+      bad += k;
+    }
   };
-  param("z0", cfg.z[0]);
-  param("z1", cfg.z[1]);
-  param("z2", cfg.z[2]);
-  param("maxLevel", cfg.maxLevel);
-  param("cautionEta", cfg.cautionEta);
-  param("warningEta", cfg.warningEta);
-  param("rainOnS", cfg.rainOnS);
-  param("rainOffS", cfg.rainOffS);
-  if (cfg.rainOnS < 0.5f) cfg.rainOnS = 0.5f;
-  if (cfg.rainOffS < 0) cfg.rainOffS = 0;
+  param("z0", cfg.z[0], 0, INSTALL_HEIGHT_MM);
+  param("z1", cfg.z[1], 0, INSTALL_HEIGHT_MM);
+  param("z2", cfg.z[2], 0, INSTALL_HEIGHT_MM);
+  param("maxLevel", cfg.maxLevel, 0, INSTALL_HEIGHT_MM);
+  param("cautionEta", cfg.cautionEta, 0, TIME_MAX_S);
+  param("warningEta", cfg.warningEta, 0, TIME_MAX_S);
+  param("rainOnS", cfg.rainOnS, RAIN_ON_MIN_S, TIME_MAX_S);
+  param("rainOffS", cfg.rainOffS, 0, TIME_MAX_S);
   commit();
-  server.send(200, "text/plain", "ok");
+  if (bad.length()) server.send(400, "text/plain", "rejected" + bad);
+  else server.send(200, "text/plain", "ok");
 }
 
 // 관제 화면 요청 거르기. 보드 AP 주소로 들어왔고 AP 대역에서 보낸 요청만 받음
