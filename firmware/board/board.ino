@@ -66,12 +66,15 @@ const float FAULT_LOW_MV = 300.0f;    // 이 아래는 단선이나 전원 이�
 const float FAULT_HIGH_MV = 2800.0f;  // 이 위는 단락이나 과전압
 const int GOOD_READS = 32;            // 64번 중 범위 안 읽기가 이보다 적은 묶음은 수위에 안 넣음
 const int MISS_BURSTS = 20;           // 그런 묶음이 이만큼(2초) 이어지면 센서 이상
+const int CAL_BURSTS = 50;            // 이상 없는 묶음이 이만큼(5초) 이어져야 보정을 받음
 
 // ===== 입력 범위(웹에서 받는 값과 플래시에서 읽은 값) =====
 // 수위 칸(z·maxLevel·보정 mm)은 0~INSTALL_HEIGHT_MM 만 받음
 const float TIME_MAX_S = 1800.0f;                // 경보 초와 강우 ON·OFF 초의 최대(회차 최대 길이)
 const float RAIN_ON_MIN_S = 0.5f;                // 강우 ON 초의 최소
+const float FLOW_ML_MIN = 1.0f;                  // 유량 측정 30초에 받은 양의 최소(mL)
 const float FLOW_ML_MAX = 30000.0f;              // 유량 측정 30초에 받은 양의 최대(mL)
+const float AREA_MIN_CM2 = 1.0f;                 // 수면 면적의 최소(cm², 상승 속도의 inf 를 막음)
 const float SLOPE_MIN = LEVEL_SLOPE_THEORY / 2;  // 보정 기울기의 최소(이론값의 1/2배)
 const float SLOPE_MAX = LEVEL_SLOPE_THEORY * 2;  // 보정 기울기의 최대(이론값의 2배)
 
@@ -115,6 +118,7 @@ String stopWhy = "";
 
 float levelMv = 0, levelMm = 0;
 float goodMv = 0;  // 300~2800 mV 안의 읽기만 이동평균한 전압. 수위와 보정에 씀
+int streak = 0;    // 센서 이상 없이 goodMv 가 갱신된 묶음이 이어진 수(CAL_BURSTS 에서 멈춤)
 bool fault = false;
 bool floatLow = false;
 float rateMeas = 0, rateModel = 0, rate = 0;  // mm/s
@@ -231,8 +235,9 @@ void recall() {
   keep("maxLevel", cfg.maxLevel, d.maxLevel, 0, INSTALL_HEIGHT_MM);
   keep("cautionEta", cfg.cautionEta, d.cautionEta, 0, TIME_MAX_S);
   keep("warningEta", cfg.warningEta, d.warningEta, 0, TIME_MAX_S);
-  keep("flowMlS", cfg.flowMlS, d.flowMlS, 0, FLOW_ML_MAX / 30);
-  keep("areaCm2", cfg.areaCm2, d.areaCm2, 0, INFINITY);
+  // 유량 0 은 아직 모름이라 그대로 둠
+  if (cfg.flowMlS != 0) keep("flowMlS", cfg.flowMlS, d.flowMlS, FLOW_ML_MIN / 30, FLOW_ML_MAX / 30);
+  keep("areaCm2", cfg.areaCm2, d.areaCm2, AREA_MIN_CM2, INFINITY);
   keep("rainOnS", cfg.rainOnS, d.rainOnS, RAIN_ON_MIN_S, TIME_MAX_S);
   keep("rainOffS", cfg.rainOffS, d.rainOffS, 0, TIME_MAX_S);
   // pumpMaxOnS·runMaxS 는 웹에서 못 바꾸므로 기본값이 최대
@@ -286,6 +291,8 @@ void sample() {
     goodMv = (goodMv == 0) ? good : goodMv * 0.85f + good * 0.15f;
   }
   fault = levelMv < FAULT_LOW_MV || levelMv > FAULT_HIGH_MV || miss >= MISS_BURSTS;
+  if (fault || isnan(good)) streak = 0;
+  else if (streak < CAL_BURSTS) streak++;
   levelMm = cfg.lvSlope * goodMv + cfg.lvOffset;
   if (levelMm < 0) levelMm = 0;
   bool closed = digitalRead(PIN_FLOAT) == LOW;
@@ -690,6 +697,10 @@ void csv() {
 
 // GET /api/cmd?c=명령&v=값: 시작·정지·수동·유량 측정·보정
 // 값을 받는 명령(flowset·cal1·cal2)은 값이 수가 아니거나 범위 밖이거나 쓸 수 없으면 하지 않고 400
+// 보정은 이상 없는 묶음이 CAL_BURSTS 번 이어진 뒤에만 하고 아니면 400
+// goodMv 는 끊김·합선 중에는 그 전 값, 되살아난 직후에는 옛 값이 섞인 값,
+// 부팅 뒤 수위에 넣는 첫 묶음 전에는 0 이라 보정이 틀어짐
+// areaapply 는 이번 회차 추정 면적이 AREA_MIN_CM2 이상일 때만 하고 아니면 400
 void cmd() {
   String c = server.arg("c");
   float v = 0;
@@ -716,16 +727,19 @@ void cmd() {
     mode = M_FLOWTEST;
     flowTestStart = millis();
   } else if (c == "flowset") {
-    bad = !number(server.arg("v"), 0, FLOW_ML_MAX, v) || v <= 0;
+    bad = !number(server.arg("v"), FLOW_ML_MIN, FLOW_ML_MAX, v);
     if (!bad) {
       cfg.flowMlS = v / 30.0f;
       commit();
     }
-  } else if (c == "areaapply" && areaEst > 0) {
-    cfg.areaCm2 = areaEst;
-    commit();
+  } else if (c == "areaapply") {
+    bad = !inside(areaEst, AREA_MIN_CM2, INFINITY);
+    if (!bad) {
+      cfg.areaCm2 = areaEst;
+      commit();
+    }
   } else if (c == "cal1") {
-    bad = !number(server.arg("v"), 0, INSTALL_HEIGHT_MM, v);
+    bad = streak < CAL_BURSTS || !number(server.arg("v"), 0, INSTALL_HEIGHT_MM, v);
     if (!bad) {
       cfg.cal1mv = goodMv;
       cfg.cal1mm = v;
@@ -736,7 +750,7 @@ void cmd() {
     }
   } else if (c == "cal2") {
     // 보정점 1 뒤 전압이 5 mV 넘게 달라졌고 기울기가 SLOPE_MIN~SLOPE_MAX 안일 때만
-    bad = !cfg.cal1 || fabs(goodMv - cfg.cal1mv) <= 5 ||
+    bad = streak < CAL_BURSTS || !cfg.cal1 || fabs(goodMv - cfg.cal1mv) <= 5 ||
           !number(server.arg("v"), 0, INSTALL_HEIGHT_MM, v);
     float slope = bad ? 0 : (v - cfg.cal1mm) / (goodMv - cfg.cal1mv);
     bad = bad || !inside(slope, SLOPE_MIN, SLOPE_MAX);
