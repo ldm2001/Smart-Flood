@@ -414,11 +414,11 @@ void control() {
     cutoff("급수통 물 부족(플로트)");
     return;
   }
-  if (mode != M_MANUAL && mode != M_FLOWTEST && fault) {
+  if (fault) {  // 수위를 모르면 수동·유량 측정도 멈춤
     cutoff("수위센서 이상(12V·배선 확인)");
     return;
   }
-  if (!fault && levelMm >= cfg.maxLevel && mode != M_FLOWTEST) {
+  if (levelMm >= cfg.maxLevel && mode != M_FLOWTEST) {
     cutoff("안전 최대 수위 도달");
     return;
   }
