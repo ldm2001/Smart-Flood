@@ -414,7 +414,7 @@ void control() {
     cutoff("급수통 물 부족(플로트)");
     return;
   }
-  if (fault) {  // 수위를 모르면 수동·유량 측정도 멈춤
+  if (fault && mode != M_FLOWTEST) {  // 수위를 모르면 멈춤(유량 측정은 계량컵에 받아 수위와 무관)
     cutoff("수위센서 이상(12V·배선 확인)");
     return;
   }
